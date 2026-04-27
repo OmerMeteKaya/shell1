@@ -1,0 +1,64 @@
+//
+// Created by mete on 23.04.2026.
+//
+
+#ifndef MYSHELL_SHELL_H
+#define MYSHELL_SHELL_H
+
+#include <stddef.h>
+#include <glob.h>
+
+#define MAX_ARGS    64
+#define MAX_TOKENS  256
+#define MAX_INPUT   4096
+
+typedef enum {
+    TOK_EOF = 0,
+    TOK_WORD,
+    TOK_PIPE,
+    TOK_REDIR_IN,    /* <  */
+    TOK_REDIR_OUT,   /* >  */
+    TOK_REDIR_APP,   /* >> */
+    TOK_BG           /* &  */
+} TokenType;
+
+typedef struct {
+    TokenType type;
+    char     *value;   /* TOK_WORD için malloc'd string */
+} Token;
+
+typedef struct {
+    char **argv;
+    int    argc;
+    char  *infile;
+    char  *outfile;
+    int    append;
+} Command;
+
+typedef struct {
+    Command *commands;
+    int      ncommands;
+    int      background;
+} Pipeline;
+
+/* lexer.c */
+Token    *lex(const char *input, int *ntokens);
+void      tokens_free(Token *toks, int n);
+
+/* parser.c */
+Pipeline *parse(Token *toks, int ntokens);
+void      pipeline_free(Pipeline *p);
+
+/* executor.c */
+int execute(Pipeline *p);
+
+/* builtins.c */
+int is_builtin(const char *cmd);
+int run_builtin(Command *cmd);
+
+/* expand.c */
+char *expand_word(const char *word, int last_exit_status);
+void  expand_tokens(Token *toks, int ntokens, int last_exit_status);
+Token *glob_expand_tokens(Token *toks, int *ntokens, int last_exit_status);
+
+#endif //MYSHELL_SHELL_H
