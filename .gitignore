@@ -1,1 +1,6 @@
 .aider*
+.gitignore
+./a.out
+.idea
+mysh
+.qwen
