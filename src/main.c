@@ -25,8 +25,14 @@ int main() {
     // Initialize signals and jobs
     signals_init();
     jobs_init();
-    history_init("~/.mysh_history");
-    
+    char history_path[512];
+    const char *home = getenv("HOME");
+    if (home) {
+        snprintf(history_path, sizeof(history_path), "%s/.mysh_history", home);
+    } else {
+        snprintf(history_path, sizeof(history_path), ".mysh_history");
+    }
+    history_init(history_path);
     // Take shell process group ownership
     pid_t shell_pgid = getpid();
     setpgid(shell_pgid, shell_pgid);
@@ -37,7 +43,21 @@ int main() {
         printf("mysh> ");
         fflush(stdout);
 
-        char *input = read_line("mysh> ");
+        char prompt[512];
+        char cwd[256];
+        if (getcwd(cwd, sizeof(cwd))) {
+            const char *home = getenv("HOME");
+            char display[256];
+            if (home && strncmp(cwd, home, strlen(home)) == 0) {
+                snprintf(display, sizeof(display), "~%s", cwd + strlen(home));
+            } else {
+                strncpy(display, cwd, sizeof(display));
+            }
+            snprintf(prompt, sizeof(prompt), "%s> ", display);
+        } else {
+            snprintf(prompt, sizeof(prompt), "mysh> ");
+        }
+        char *input = read_line(prompt);
         if (!input) {
             printf("\n");
             break;
