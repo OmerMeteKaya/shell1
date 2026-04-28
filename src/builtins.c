@@ -10,6 +10,7 @@
 #include <signal.h>
 #include <termios.h>
 #include "../include/jobs.h"
+#include "../include/alias.h"
 
 static void restore_terminal(void) {
     struct termios t;
@@ -40,7 +41,9 @@ int is_builtin(const char *cmd) {
            (strcmp(cmd, "echo") == 0) ||
            (strcmp(cmd, "jobs") == 0) ||
            (strcmp(cmd, "fg") == 0) ||
-           (strcmp(cmd, "bg") == 0);
+           (strcmp(cmd, "bg") == 0) ||
+           (strcmp(cmd, "alias") == 0) ||
+           (strcmp(cmd, "unalias") == 0);
 }
 
 int run_builtin(Command *cmd) {
@@ -266,5 +269,52 @@ int run_builtin(Command *cmd) {
         return 0;
     }
     
-    return 1; // Not a builtin command
+    if (strcmp(builtin_cmd, "alias") == 0) {
+        if (cmd->argc == 1) {
+            alias_list();
+            return 0;
+        }
+
+        char combined[4096] = {0};
+        for (int i = 1; i < cmd->argc; i++) {
+            if (i > 1) strncat(combined, " ", sizeof(combined)-strlen(combined)-1);
+            strncat(combined, cmd->argv[i], sizeof(combined)-strlen(combined)-1);
+        }
+
+        char *eq = strchr(combined, '=');
+        if (!eq) return 1;
+
+        *eq = '\0';
+        char *name = combined;
+        char *value = eq + 1;
+        
+        /* baştaki boşlukları atla */
+        while (*value == ' ') value++;
+
+        /* tüm dış tırnak katmanlarını soy */
+        while (*value == '\'' || *value == '"') {
+            char quote = *value;
+            int vlen = strlen(value);
+            if (vlen >= 2 && value[vlen-1] == quote) {
+                value++;
+                value[strlen(value)-1] = '\0';
+            } else {
+                break;
+            }
+        }
+
+        while ((*value == '\'' || *value == '"')) {
+            char quote = *value;
+            int vlen = strlen(value);
+            if (vlen >= 2 && value[vlen-1] == quote) {
+                value++;
+                value[strlen(value)-1] = '\0';
+            } else {
+                break;
+            }
+        }
+        fprintf(stderr, "DEBUG name='%s' value='%s'\n", name, value);
+        alias_add(name, value);
+        return 0;
+    }
 }

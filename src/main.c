@@ -12,6 +12,8 @@ extern int last_exit_status;
 
 #include "../include/shell.h"
 #include "../include/input.h"
+#include "../include/alias.h"
+#include "../include/rc.h"
 
 void signals_init(void);
 void jobs_init(void);
@@ -32,6 +34,18 @@ int main() {
         snprintf(history_path, sizeof(history_path), ".mysh_history");
     }
     history_init(history_path);
+
+    // Alias
+    alias_init();
+
+    char rc_path[512];
+    if (home) {
+        snprintf(rc_path, sizeof(rc_path), "%s/.myshrc", home);
+    } else {
+        snprintf(rc_path, sizeof(rc_path), ".myshrc");
+    }
+    rc_load(rc_path);
+
     // Take shell process group ownership
     pid_t shell_pgid = getpid();
     setpgid(shell_pgid, shell_pgid);
@@ -79,7 +93,29 @@ int main() {
         }
 
         tokens = glob_expand_tokens(tokens, &ntokens, last_exit_status);
+        for (int i = 0; i < ntokens; i++)
+            fprintf(stderr, "TOK[%d]: type=%d val=%s\n", i, tokens[i].type, tokens[i].value ? tokens[i].value : "null");
         if (!tokens) continue;
+
+        if (ntokens > 0 && tokens[0].type == TOK_WORD && tokens[0].value) {
+            char *expanded = alias_expand(tokens[0].value);
+            if (expanded) {
+
+                char combined[4096];
+                snprintf(combined, sizeof(combined), "%s", expanded);
+                for (int i = 1; i < ntokens - 1; i++) { /* -1 for EOF */
+                    if (tokens[i].value) {
+                        strncat(combined, " ", sizeof(combined)-strlen(combined)-1);
+                        strncat(combined, tokens[i].value, sizeof(combined)-strlen(combined)-1);
+                    }
+                }
+                tokens_free(tokens, ntokens);
+                tokens = lex(combined, &ntokens);
+                if (!tokens) continue;
+                tokens = glob_expand_tokens(tokens, &ntokens, last_exit_status);
+                if (!tokens) continue;
+            }
+        }
 
         // Execution
         CmdList *list = parse_list(tokens, ntokens);
@@ -92,6 +128,7 @@ int main() {
         free(input);
     }
     history_close();
+    alias_free();
     
     return 0;
 }

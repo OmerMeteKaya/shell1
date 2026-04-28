@@ -19,4 +19,8 @@ add_executable(shell
         src/signals.c
         src/expand.c
         src/input.c
-        include/input.h)
+        include/input.h
+        src/alias.c
+        include/alias.h
+        src/rc.c
+        include/rc.h)
