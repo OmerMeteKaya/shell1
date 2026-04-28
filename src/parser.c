@@ -205,6 +205,19 @@ Pipeline *parse(Token *toks, int ntokens) {
         }
     }
 
+    /* Finalize last command if loop ended without TOK_EOF */
+    if (current_cmd && argv_count > 0 && !current_cmd->argv) {
+        if (argv_count >= argv_capacity) {
+            char **tmp = realloc(argv, (argv_count + 1) * sizeof(char*));
+            if (tmp) argv = tmp;
+        }
+        argv[argv_count] = NULL;
+        current_cmd->argv = argv;
+        current_cmd->argc = argv_count;
+    } else if (argv) {
+        free(argv);
+    }
+
     // Handle case where there were no tokens except maybe BG
     if (cmd_count == 1 && (!commands[0].argv || commands[0].argc == 0)) {
         if (commands[0].argv) {
@@ -257,4 +270,90 @@ void pipeline_free(Pipeline *p) {
     }
     free(p->commands);
     free(p);
+}
+
+CmdList *parse_list(Token *toks, int ntokens) {
+    if (!toks || ntokens <= 0) {
+        return NULL;
+    }
+
+    CmdList *list = malloc(sizeof(CmdList));
+    if (!list) {
+        return NULL;
+    }
+
+    list->nodes = malloc(4 * sizeof(CmdNode));
+    if (!list->nodes) {
+        free(list);
+        return NULL;
+    }
+
+    int capacity = 4;
+    int count = 0;
+    int segment_start = 0;
+
+    for (int i = 0; i <= ntokens; i++) {
+        TokenType type = (i == ntokens) ? TOK_EOF : toks[i].type;
+
+        if (type == TOK_AND || type == TOK_OR || type == TOK_SEMI || type == TOK_EOF) {
+            // Segmenti ayrıştır
+            Pipeline *pipeline = NULL;
+            int segment_len = i - segment_start;
+            
+            if (segment_len > 0) {
+                pipeline = parse(toks + segment_start, segment_len);
+                // Boş segmentler için placeholder oluştur - sessizce devam et
+                if (!pipeline) {
+                    // Boş pipeline için NULL bırakılabilir
+                }
+            }
+
+            // CmdNode oluştur ve listeye ekle
+            if (count >= capacity) {
+                capacity *= 2;
+                CmdNode *tmp = realloc(list->nodes, capacity * sizeof(CmdNode));
+                if (!tmp) {
+                    // Temizlik yap
+                    if (pipeline) {
+                        pipeline_free(pipeline);
+                    }
+                    for (int j = 0; j < count; j++) {
+                        if (list->nodes[j].pipeline) {
+                            pipeline_free(list->nodes[j].pipeline);
+                        }
+                    }
+                    free(list->nodes);
+                    free(list);
+                    return NULL;
+                }
+                list->nodes = tmp;
+            }
+
+            ListOp op = OP_NONE;
+            if (type == TOK_AND) op = OP_AND;
+            else if (type == TOK_OR) op = OP_OR;
+            else if (type == TOK_SEMI) op = OP_SEMI;
+
+            list->nodes[count].pipeline = pipeline;
+            list->nodes[count].op = op;
+            count++;
+
+            segment_start = i + 1;
+        }
+    }
+
+    list->count = count;
+    return list;
+}
+
+void cmdlist_free(CmdList *list) {
+    if (!list) return;
+
+    for (int i = 0; i < list->count; i++) {
+        if (list->nodes[i].pipeline) {
+            pipeline_free(list->nodes[i].pipeline);
+        }
+    }
+    free(list->nodes);
+    free(list);
 }

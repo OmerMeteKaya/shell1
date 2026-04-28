@@ -10,18 +10,67 @@
 #include <glob.h>
 #include "../include/input.h"
 
+static int utf8_display_len(const char *s) {
+    int cols = 0;
+    while (*s) {
+        unsigned char c = (unsigned char)*s;
+        if (c < 0x80) {
+            cols++; s++;
+        } else if (c < 0xC0) {
+            /* continuation byte — skip, don't count */
+            s++;
+        } else if (c < 0xE0) {
+            cols++; s += 2;
+        } else if (c < 0xF0) {
+            cols++; s += 3;
+        } else {
+            cols++; s += 4;
+        }
+    }
+    return cols;
+}
+
 static void render(const char *prompt, const char *buf, int len, int pos) {
     write(STDOUT_FILENO, "\r", 1);
     write(STDOUT_FILENO, prompt, strlen(prompt));
     write(STDOUT_FILENO, buf, len);
-    write(STDOUT_FILENO, "\033[K", 3);   /* erase to end of line */
-    int back = len - pos;
-    if (back > 0) {
-        char esc[16];
-        snprintf(esc, sizeof(esc), "\033[%dD", back);
-        write(STDOUT_FILENO, esc, strlen(esc));
+    write(STDOUT_FILENO, "\033[K", 3);
+
+    /* buf[pos..len] arasındaki display kolonlarını say */
+    char tmp[MAX_INPUT];
+    int tail = len - pos;
+    if (tail > 0) {
+        memcpy(tmp, buf + pos, tail);
+        tmp[tail] = '\0';
+        int back = utf8_display_len(tmp);
+        if (back > 0) {
+            char esc[16];
+            snprintf(esc, sizeof(esc), "\033[%dD", back);
+            write(STDOUT_FILENO, esc, strlen(esc));
+        }
     }
 }
+
+static int utf8_char_len(const char *buf, int pos) {
+    unsigned char c = (unsigned char)buf[pos];
+    if (c < 0x80) return 1;
+    if (c < 0xC0) return 1; /* continuation byte — shouldn't happen at start */
+    if (c < 0xE0) return 2;
+    if (c < 0xF0) return 3;
+    return 4;
+}
+
+static int utf8_prev_char_len(const char *buf, int pos) {
+    if (pos <= 0) return 0;
+    int back = 1;
+    /* walk back over continuation bytes 10xxxxxx */
+    while (back < pos && back < 4 &&
+           ((unsigned char)buf[pos - back] & 0xC0) == 0x80) {
+        back++;
+    }
+    return back;
+}
+
 static int word_start(const char *buf, int pos) {
     int i = pos - 1;
     while (i > 0 && buf[i-1] != ' ') i--;
@@ -69,10 +118,12 @@ static void render_with_suggestion(const char *prompt, const char *buf, int len,
             write(STDOUT_FILENO, ghost, strlen(ghost));
             write(STDOUT_FILENO, "\033[0m", 4);
             /* move cursor back to correct position */
-            int ghost_len = strlen(ghost);
-            char esc[16];
-            snprintf(esc, sizeof(esc), "\033[%dD", ghost_len);
-            write(STDOUT_FILENO, esc, strlen(esc));
+            int ghost_cols = utf8_display_len(ghost);
+            if (ghost_cols > 0) {
+                char esc[16];
+                snprintf(esc, sizeof(esc), "\033[%dD", ghost_cols);
+                write(STDOUT_FILENO, esc, strlen(esc));
+            }
             free(sug);
         }
     }
@@ -106,6 +157,9 @@ char *read_line(const char *prompt) {
     raw.c_lflag &= ~(ICANON | ECHO | ISIG);
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
+    #ifdef IUTF8
+        raw.c_iflag |= IUTF8;
+    #endif
     if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
         return NULL;
     }
@@ -230,9 +284,10 @@ char *read_line(const char *prompt) {
         /* Backspace */
         if (c == 127 || c == 8) {
             if (pos > 0) {
-                memmove(buf + pos - 1, buf + pos, len - pos);
-                len--;
-                pos--;
+                int back = utf8_prev_char_len(buf, pos);
+                memmove(buf + pos - back, buf + pos, len - pos);
+                len -= back;
+                pos -= back;
                 if (len == 0) {
                     hist_off = 0;
                     memset(saved, 0, MAX_INPUT);
@@ -259,18 +314,20 @@ char *read_line(const char *prompt) {
         /* Ctrl+F */
         if (c == 6) {
             if (pos < len) {
-                pos++;
-                render_with_suggestion(prompt, buf, len, pos);
+                pos += utf8_char_len(buf, pos);
+                if (pos > len) pos = len;
             }
+            render_with_suggestion(prompt, buf, len, pos);
             continue;
         }
         
         /* Ctrl+B */
         if (c == 2) {
             if (pos > 0) {
-                pos--;
-                render_with_suggestion(prompt, buf, len, pos);
+                pos -= utf8_prev_char_len(buf, pos);
+                if (pos < 0) pos = 0;
             }
+            render_with_suggestion(prompt, buf, len, pos);
             continue;
         }
         
@@ -330,34 +387,65 @@ char *read_line(const char *prompt) {
                 /* Sağ ok */
                 if (seq[1] == 'C') {
                     if (pos < len) {
-                        pos++;
-                        render_with_suggestion(prompt, buf, len, pos);
+                        pos += utf8_char_len(buf, pos);
+                        if (pos > len) pos = len;
                     }
+                    render_with_suggestion(prompt, buf, len, pos);
                     continue;
                 }
                 
                 /* Sol ok */
                 if (seq[1] == 'D') {
                     if (pos > 0) {
-                        pos--;
-                        render_with_suggestion(prompt, buf, len, pos);
+                        pos -= utf8_prev_char_len(buf, pos);
+                        if (pos < 0) pos = 0;
                     }
+                    render_with_suggestion(prompt, buf, len, pos);
                     continue;
                 }
             }
             continue;
         }
         
-        /* Yazdırılabilir karakterler */
-        if (c >= 32 && c < 127) {
+        /* ASCII printable */
+        if ((unsigned char)c >= 32 && c < 127) {
             if (len < MAX_INPUT - 1) {
                 memmove(buf + pos + 1, buf + pos, len - pos);
                 buf[pos] = c;
-                len++;
-                pos++;
+                len++; pos++;
+            }
+            render_with_suggestion(prompt, buf, len, pos);
+            continue;
+        }
+
+        /* UTF-8 multi-byte leading byte */
+        if ((unsigned char)c >= 0xC0 && (unsigned char)c <= 0xF7) {
+            /* determine sequence length */
+            int nb;
+            unsigned char uc = (unsigned char)c;
+            if      (uc >= 0xF0) nb = 4;
+            else if (uc >= 0xE0) nb = 3;
+            else                  nb = 2;
+
+            if (len + nb < MAX_INPUT - 1) {
+                /* read remaining bytes */
+                char seq[4];
+                seq[0] = c;
+                for (int b = 1; b < nb; b++) {
+                    if (read(STDIN_FILENO, &seq[b], 1) <= 0) goto done;
+                    /* must be continuation byte 10xxxxxx */
+                    if (((unsigned char)seq[b] & 0xC0) != 0x80) goto done;
+                }
+                /* insert all nb bytes at cursor position */
+                memmove(buf + pos + nb, buf + pos, len - pos);
+                memcpy(buf + pos, seq, nb);
+                len += nb;
+                pos += nb;
             }
             render_with_suggestion(prompt, buf, len, pos);
             continue;
         }
     }
+    
+    done: ;   /* UTF-8 error recovery */
 }

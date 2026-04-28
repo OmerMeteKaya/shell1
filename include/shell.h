@@ -19,7 +19,10 @@ typedef enum {
     TOK_REDIR_IN,    /* <  */
     TOK_REDIR_OUT,   /* >  */
     TOK_REDIR_APP,   /* >> */
-    TOK_BG           /* &  */
+    TOK_BG,          /* &  */
+    TOK_AND,         /* && */
+    TOK_OR,          /* || */
+    TOK_SEMI         /* ;  */
 } TokenType;
 
 typedef struct {
@@ -41,6 +44,23 @@ typedef struct {
     int      background;
 } Pipeline;
 
+typedef enum {
+    OP_NONE,   /* son eleman */
+    OP_AND,    /* && */
+    OP_OR,     /* || */
+    OP_SEMI    /* ;  */
+} ListOp;
+
+typedef struct {
+    Pipeline *pipeline;
+    ListOp    op;
+} CmdNode;
+
+typedef struct {
+    CmdNode *nodes;
+    int      count;
+} CmdList;
+
 /* lexer.c */
 Token    *lex(const char *input, int *ntokens);
 void      tokens_free(Token *toks, int n);
@@ -48,9 +68,12 @@ void      tokens_free(Token *toks, int n);
 /* parser.c */
 Pipeline *parse(Token *toks, int ntokens);
 void      pipeline_free(Pipeline *p);
+CmdList *parse_list(Token *toks, int ntokens);
 
 /* executor.c */
 int execute(Pipeline *p);
+int execute_list(CmdList *list);
+void cmdlist_free(CmdList *list);
 
 /* builtins.c */
 int is_builtin(const char *cmd);

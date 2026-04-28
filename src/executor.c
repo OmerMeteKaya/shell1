@@ -15,6 +15,42 @@
 extern void set_fg_pid(pid_t pid);
 extern int  last_exit_status;
 
+int execute_list(CmdList *list) {
+    if (!list || list->count == 0) return 0;
+
+    int last_status = 0;
+
+    for (int i = 0; i < list->count; i++) {
+        CmdNode *node = &list->nodes[i];
+        if (!node->pipeline) continue;
+
+        /* Decide whether to run this pipeline based on previous status */
+        /* First node always runs */
+        if (i > 0) {
+            ListOp prev_op = list->nodes[i-1].op;
+            if (prev_op == OP_AND && last_status != 0) continue; /* skip */
+            if (prev_op == OP_OR  && last_status == 0) continue; /* skip */
+            /* OP_SEMI and OP_NONE: always run */
+        }
+
+        /* Check if first command is builtin */
+        Pipeline *p = node->pipeline;
+        if (p->ncommands > 0 &&
+            p->commands[0].argc > 0 &&
+            is_builtin(p->commands[0].argv[0])) {
+            last_status = run_builtin(&p->commands[0]);
+        } else {
+            last_status = execute(p);
+        }
+
+        /* Update global last_exit_status */
+        extern int last_exit_status;
+        last_exit_status = last_status;
+    }
+
+    return last_status;
+}
+
 int execute(Pipeline *p) {
     if (!p || p->ncommands == 0) {
         return -1;

@@ -63,16 +63,30 @@ Token *lex(const char *input, int *ntokens) {
 
         // Single character operators
         switch (*p) {
+            case '&':
+                if (*(p+1) == '&') {
+                    if (!add_token(&tokens, &count, &capacity, TOK_AND, NULL)) return NULL;
+                    p += 2;
+                } else {
+                    if (!add_token(&tokens, &count, &capacity, TOK_BG, NULL)) return NULL;
+                    p++;
+                }
+                continue;
             case '|':
-                if (!add_token(&tokens, &count, &capacity, TOK_PIPE, NULL)) return NULL;
+                if (*(p+1) == '|') {
+                    if (!add_token(&tokens, &count, &capacity, TOK_OR, NULL)) return NULL;
+                    p += 2;
+                } else {
+                    if (!add_token(&tokens, &count, &capacity, TOK_PIPE, NULL)) return NULL;
+                    p++;
+                }
+                continue;
+            case ';':
+                if (!add_token(&tokens, &count, &capacity, TOK_SEMI, NULL)) return NULL;
                 p++;
                 continue;
             case '<':
                 if (!add_token(&tokens, &count, &capacity, TOK_REDIR_IN, NULL)) return NULL;
-                p++;
-                continue;
-            case '&':
-                if (!add_token(&tokens, &count, &capacity, TOK_BG, NULL)) return NULL;
                 p++;
                 continue;
             case '>':

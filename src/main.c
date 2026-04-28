@@ -20,7 +20,6 @@ void jobs_init(void);
 
 int main() {
 
-    char input[MAX_INPUT];
     
     // Initialize signals and jobs
     signals_init();
@@ -40,9 +39,6 @@ int main() {
     
     
     while (1) {
-        printf("mysh> ");
-        fflush(stdout);
-
         char prompt[512];
         char cwd[256];
         if (getcwd(cwd, sizeof(cwd))) {
@@ -85,26 +81,13 @@ int main() {
         tokens = glob_expand_tokens(tokens, &ntokens, last_exit_status);
         if (!tokens) continue;
 
-        // Parsing
-        Pipeline *pipeline = parse(tokens, ntokens);
-        if (!pipeline) {
-            tokens_free(tokens, ntokens);
-            continue;
-        }
-        
         // Execution
-        if (pipeline->ncommands > 0 && 
-            pipeline->commands[0].argc > 0 && 
-            is_builtin(pipeline->commands[0].argv[0])) {
-            // Run built-in command
-            run_builtin(&pipeline->commands[0]);
-        } else {
-            // Execute external commands
-            execute(pipeline);
+        CmdList *list = parse_list(tokens, ntokens);
+        if (list) {
+            execute_list(list);
+            cmdlist_free(list);
         }
-        
         // Cleanup
-        pipeline_free(pipeline);
         tokens_free(tokens, ntokens);
         free(input);
     }

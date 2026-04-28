@@ -8,7 +8,17 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#include <termios.h>
 #include "../include/jobs.h"
+
+static void restore_terminal(void) {
+    struct termios t;
+    tcgetattr(STDIN_FILENO, &t);
+    t.c_lflag |= (ICANON | ECHO | ISIG);
+    tcsetattr(STDIN_FILENO, TCSAFLUSH, &t);
+    /* move to new line so prompt is clean */
+    write(STDOUT_FILENO, "\r\n", 2);
+}
 
 // Assuming Command structure is defined elsewhere
 typedef struct {
@@ -54,11 +64,8 @@ int run_builtin(Command *cmd) {
     }
     
     if (strcmp(builtin_cmd, "exit") == 0) {
-        int status = 0;
-        if (cmd->argc > 1) {
-            status = atoi(cmd->argv[1]);
-        }
-        exit(status);
+        restore_terminal();
+        exit(cmd->argc > 1 ? atoi(cmd->argv[1]) : 0);
     }
     
     if (strcmp(builtin_cmd, "export") == 0) {
