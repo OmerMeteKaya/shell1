@@ -90,6 +90,30 @@ char *history_search_prefix(const char *prefix) {
     return NULL;
 }
 
+char *history_search(const char *query, int skip) {
+    if (!db || !query || !*query) return NULL;
+    
+    const char *sql = "SELECT cmd FROM history WHERE cmd LIKE '%' || ? || '%' ORDER BY id DESC LIMIT 1 OFFSET ?;";
+    sqlite3_stmt *stmt;
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return NULL;
+    }
+    
+    sqlite3_bind_text(stmt, 1, query, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, skip);
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        const char *cmd = (const char *)sqlite3_column_text(stmt, 0);
+        char *result = strdup(cmd);
+        sqlite3_finalize(stmt);
+        return result;
+    }
+    
+    sqlite3_finalize(stmt);
+    return NULL;
+}
+
 void history_close(void) {
     if (db) {
         sqlite3_close(db);

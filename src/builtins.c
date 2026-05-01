@@ -11,6 +11,7 @@
 #include <termios.h>
 #include "../include/jobs.h"
 #include "../include/alias.h"
+#include "../include/rc.h"
 
 static void restore_terminal(void) {
     struct termios t;
@@ -43,7 +44,9 @@ int is_builtin(const char *cmd) {
            (strcmp(cmd, "fg") == 0) ||
            (strcmp(cmd, "bg") == 0) ||
            (strcmp(cmd, "alias") == 0) ||
-           (strcmp(cmd, "unalias") == 0);
+           (strcmp(cmd, "unalias") == 0) ||
+           (strcmp(cmd, "source") == 0) ||
+           (strcmp(cmd, ".") == 0);
 }
 
 int run_builtin(Command *cmd) {
@@ -315,6 +318,16 @@ int run_builtin(Command *cmd) {
         }
         fprintf(stderr, "DEBUG name='%s' value='%s'\n", name, value);
         alias_add(name, value);
+        return 0;
+    }
+    
+    if (strcmp(builtin_cmd, "source") == 0 ||
+        strcmp(builtin_cmd, ".") == 0) {
+        if (cmd->argc < 2) {
+            fprintf(stderr, "%s: filename required\n", builtin_cmd);
+            return 1;
+        }
+        rc_load(cmd->argv[1]);
         return 0;
     }
 }

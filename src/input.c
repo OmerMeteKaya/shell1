@@ -77,6 +77,99 @@ static int word_start(const char *buf, int pos) {
     return i;
 }
 
+static void render_search(const char *query, int qlen, const char *match) {
+    write(STDOUT_FILENO, "\r", 1);
+    write(STDOUT_FILENO, "\033[K", 3);
+    const char *sp = "(reverse-i-search)`";
+    write(STDOUT_FILENO, sp, strlen(sp));
+    write(STDOUT_FILENO, query, qlen);
+    const char *sep = "': ";
+    write(STDOUT_FILENO, sep, strlen(sep));
+    if (match && *match)
+        write(STDOUT_FILENO, match, strlen(match));
+}
+
+static char *search_history_interactive(const char *prompt) {
+    /*
+     * Enters reverse-i-search mode.
+     * Returns malloc'd command string if accepted, NULL if cancelled.
+     */
+    char query[MAX_INPUT] = {0};
+    int  qlen = 0;
+    int  skip = 0;       /* how many matches to skip (for repeated Ctrl+R) */
+    char match[MAX_INPUT] = {0};
+
+    render_search(query, qlen, match);
+
+    while (1) {
+        char c;
+        if (read(STDIN_FILENO, &c, 1) <= 0) return NULL;
+
+        /* Ctrl+R — next match */
+        if (c == 18) {
+            skip++;
+            char *h = history_search(query, skip);
+            if (h) {
+                strncpy(match, h, MAX_INPUT - 1);
+                free(h);
+            } else {
+                skip--;  /* no more matches, stay */
+            }
+            render_search(query, qlen, match);
+            continue;
+        }
+
+        /* Enter — accept match */
+        if (c == '\r' || c == '\n') {
+            write(STDOUT_FILENO, "\r\n", 2);
+            if (match[0]) return strdup(match);
+            return NULL;
+        }
+
+        /* ESC or Ctrl+C — cancel */
+        if (c == 27 || c == 3) {
+            write(STDOUT_FILENO, "\r\n", 2);
+            return NULL;
+        }
+
+        /* Backspace */
+        if (c == 127 || c == 8) {
+            if (qlen > 0) {
+                qlen--;
+                query[qlen] = '\0';
+                skip = 0;
+                char *h = history_search(query, 0);
+                if (h) {
+                    strncpy(match, h, MAX_INPUT - 1);
+                    free(h);
+                } else {
+                    match[0] = '\0';
+                }
+            }
+            render_search(query, qlen, match);
+            continue;
+        }
+
+        /* Printable char — add to query */
+        if (c >= 32 && c < 127) {
+            if (qlen < MAX_INPUT - 1) {
+                query[qlen++] = c;
+                query[qlen] = '\0';
+                skip = 0;
+                char *h = history_search(query, 0);
+                if (h) {
+                    strncpy(match, h, MAX_INPUT - 1);
+                    free(h);
+                } else {
+                    match[0] = '\0';
+                }
+            }
+            render_search(query, qlen, match);
+            continue;
+        }
+    }
+}
+
 static char *find_suggestion(const char *buf, int len) {
     if (len == 0) return NULL;
 
@@ -331,6 +424,27 @@ char *read_line(const char *prompt) {
             continue;
         }
         
+        /* Ctrl+R — reverse history search */
+        if (c == 18) {
+            char *result = search_history_interactive(prompt);
+            if (result) {
+                /* put result into buf */
+                strncpy(buf, result, MAX_INPUT - 1);
+                buf[MAX_INPUT - 1] = '\0';
+                len = strlen(buf);
+                pos = len;
+                free(result);
+            } else {
+                /* cancelled — clear buf */
+                memset(buf, 0, MAX_INPUT);
+                len = 0;
+                pos = 0;
+            }
+            hist_off = 0;
+            render_with_suggestion(prompt, buf, len, pos);
+            continue;
+        }
+
         /* ESC sequence */
         if (c == 27) {
             char seq[2];

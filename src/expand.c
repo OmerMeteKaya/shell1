@@ -9,6 +9,9 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <glob.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include "../include/rc.h"
 
 static char *itoa(int value) {
     static char buf[32];
@@ -40,7 +43,87 @@ static int append_str(char **buf, size_t *len, size_t *capacity, const char *str
     return 0;
 }
 
+static char *run_command_substitution(const char *cmd_str) {
+    /*
+     * Runs cmd_str in a subshell, captures stdout, returns as string.
+     * Caller must free() result.
+     */
+    if (!cmd_str || !*cmd_str) return strdup("");
+
+    /* Create pipe to capture child stdout */
+    int pipefd[2];
+    if (pipe(pipefd) < 0) return strdup("");
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]); close(pipefd[1]);
+        return strdup("");
+    }
+
+    if (pid == 0) {
+        /* child: redirect stdout to pipe write end */
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        /* run cmd_str through shell pipeline */
+        /* re-lex and execute */
+        extern Token *lex(const char *input, int *ntokens);
+        extern Token *glob_expand_tokens(Token *toks, int *ntokens, int last_exit);
+        extern CmdList *parse_list(Token *toks, int ntokens);
+        extern int execute_list(CmdList *list);
+        extern void cmdlist_free(CmdList *list);
+        extern void tokens_free(Token *toks, int n);
+        extern int last_exit_status;
+
+        int ntokens;
+        Token *toks = lex(cmd_str, &ntokens);
+        if (toks) {
+            toks = glob_expand_tokens(toks, &ntokens, last_exit_status);
+            if (toks) {
+                CmdList *list = parse_list(toks, ntokens);
+                if (list) {
+                    execute_list(list);
+                    cmdlist_free(list);
+                }
+                tokens_free(toks, ntokens);
+            }
+        }
+        _exit(0);
+    }
+
+    /* parent: read from pipe read end */
+    close(pipefd[1]);
+
+    char *buf = malloc(4096);
+    if (!buf) { close(pipefd[0]); waitpid(pid, NULL, 0); return strdup(""); }
+    size_t total = 0, cap = 4096;
+
+    ssize_t n;
+    while ((n = read(pipefd[0], buf + total, cap - total - 1)) > 0) {
+        total += n;
+        if (total + 1 >= cap) {
+            cap *= 2;
+            char *tmp = realloc(buf, cap);
+            if (!tmp) break;
+            buf = tmp;
+        }
+    }
+    close(pipefd[0]);
+    waitpid(pid, NULL, 0);
+
+    buf[total] = '\0';
+
+    /* strip trailing newlines (standard shell behavior) */
+    while (total > 0 && buf[total-1] == '\n') {
+        buf[--total] = '\0';
+    }
+
+    return buf;
+}
+
 char *expand_word(const char *word, int last_exit_status) {
+    fprintf(stderr, "EXPAND: '%s'\n", word);
     if (!word) return NULL;
     
     size_t word_len = strlen(word);
@@ -124,6 +207,31 @@ char *expand_word(const char *word, int last_exit_status) {
                 continue;
             }
             
+            // $(...) command substitution
+            if (*p == '(') {
+                p++;  /* skip '(' */
+                const char *cmd_start = p;
+                int depth = 1;
+                /* find matching closing paren, handle nesting */
+                while (*p && depth > 0) {
+                    if (*p == '(') depth++;
+                    else if (*p == ')') depth--;
+                    p++;
+                }
+                /* p now points after the closing ')' */
+                int cmd_len = (p - 1) - cmd_start;  /* exclude closing ')' */
+                char *cmd_str = strndup(cmd_start, cmd_len);
+                if (cmd_str) {
+                    char *output = run_command_substitution(cmd_str);
+                    free(cmd_str);
+                    if (output) {
+                        append_str(&buf, &len, &capacity, output);
+                        free(output);
+                    }
+                }
+                continue;
+            }
+
             // Handle "${VAR}" - bracketed variable
             if (*p == '{') {
                 p++;

@@ -93,9 +93,9 @@ int main() {
         }
 
         tokens = glob_expand_tokens(tokens, &ntokens, last_exit_status);
-        for (int i = 0; i < ntokens; i++)
+       /* for (int i = 0; i < ntokens; i++)
             fprintf(stderr, "TOK[%d]: type=%d val=%s\n", i, tokens[i].type, tokens[i].value ? tokens[i].value : "null");
-        if (!tokens) continue;
+        if (!tokens) continue;*/
 
         if (ntokens > 0 && tokens[0].type == TOK_WORD && tokens[0].value) {
             char *expanded = alias_expand(tokens[0].value);

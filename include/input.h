@@ -17,6 +17,7 @@ void  history_init(const char *db_path);
 void  history_add(const char *line);
 char *history_get(int offset);
 char *history_search_prefix(const char *prefix);  /* yeni fonksiyon */
+char *history_search(const char *query, int skip);
 void  history_close(void);
 
 #endif

@@ -160,14 +160,39 @@ Token *lex(const char *input, int *ntokens) {
 
         // Words
         const char *start = p;
-        while (*p && !isspace(*p) && *p != '|' && *p != '<' && *p != '>' && *p != '&' && *p != '\'' && *p != '"') {
+        while (*p) {
+            /* stop at whitespace and operators */
+            if (isspace(*p)) break;
+            if (*p == '|' || *p == '<' || *p == '>' ||
+                *p == '\'' || *p == '"') break;
+            /* stop at & only if not preceded by $ */
+            if (*p == '&') break;
+
+            /* $(...) — consume entire substitution as one unit */
+            if (*p == '$' && *(p+1) == '(') {
+                p += 2;  /* skip $( */
+                int depth = 1;
+                while (*p && depth > 0) {
+                    if (*p == '(') depth++;
+                    else if (*p == ')') depth--;
+                    p++;
+                }
+                /* p now points after closing ) */
+                continue;
+            }
+
+            /* skip ( and ) only when NOT part of $() */
+            /* bare ( or ) outside $() should stop the word */
+            if (*p == '(' || *p == ')') break;
+
             p++;
         }
+
         if (p == start) {
-            /* unrecognized character — skip it and continue */
             p++;
             continue;
         }
+
         char *value = strdup_range(start, p);
         if (!value) {
             tokens_free(tokens, count);
