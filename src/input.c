@@ -2,13 +2,27 @@
 // Created by mete on 27.04.2026.
 //
 
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 #include <glob.h>
+#include <dirent.h>
+#include <ctype.h>
 #include "../include/input.h"
+#include "../include/highlight.h"
+
+/* External declarations */
+extern int is_builtin(const char *cmd);
+extern char *alias_expand(const char *name);
+extern char *history_get(int offset);
+extern char *history_search_prefix(const char *prefix);
+extern char *history_search(const char *query, int skip);
+extern void history_add(const char *line);
+extern int history_count(void);
+extern char *highlight(const char *buf, int len);
 
 static int utf8_display_len(const char *s) {
     int cols = 0;
@@ -33,11 +47,24 @@ static int utf8_display_len(const char *s) {
 static void render(const char *prompt, const char *buf, int len, int pos) {
     write(STDOUT_FILENO, "\r", 1);
     write(STDOUT_FILENO, prompt, strlen(prompt));
-    write(STDOUT_FILENO, buf, len);
+
+    /* syntax highlighted buf */
+    char tmp_buf[MAXIMUM_INPUT + 1];
+    memcpy(tmp_buf, buf, len);
+    tmp_buf[len] = '\0';
+
+    char *colored = highlight(tmp_buf, len);
+    if (colored) {
+        write(STDOUT_FILENO, colored, strlen(colored));
+        free(colored);
+    } else {
+        write(STDOUT_FILENO, buf, len);
+    }
+
     write(STDOUT_FILENO, "\033[K", 3);
 
-    /* buf[pos..len] arasındaki display kolonlarını say */
-    char tmp[MAX_INPUT];
+    /* cursor geri al */
+    char tmp[MAXIMUM_INPUT];
     int tail = len - pos;
     if (tail > 0) {
         memcpy(tmp, buf + pos, tail);
@@ -77,6 +104,249 @@ static int word_start(const char *buf, int pos) {
     return i;
 }
 
+/* Clears N lines below current line */
+static void clear_below(int n) {
+    for (int i = 0; i < n; i++) {
+        write(STDOUT_FILENO, "\n\033[K", 4);
+    }
+    if (n > 0) {
+        char esc[16];
+        snprintf(esc, sizeof(esc), "\033[%dA", n);
+        write(STDOUT_FILENO, esc, strlen(esc));
+    }
+}
+
+
+
+static void panel_show_history(int hist_off, int *panel_rows) {
+    /* clear existing panel first */
+    if (*panel_rows > 0) {
+        for (int i = 0; i < *panel_rows; i++)
+            write(STDOUT_FILENO, "\n\033[K", 4);
+        char esc_clear[16];
+        snprintf(esc_clear, sizeof(esc_clear), "\033[%dA", *panel_rows);
+        write(STDOUT_FILENO, esc_clear, strlen(esc_clear));
+        *panel_rows = 0;
+    }
+
+    char *entries[10];
+    int count = 0;
+    for (int i = 1; i <= 10; i++) {
+        char *h = history_get(i);
+        if (!h) break;
+        entries[count++] = h;
+    }
+    if (count == 0) return;
+
+    int rows = 0;
+    for (int i = 0; i < count; i++) {
+        write(STDOUT_FILENO, "\n\033[K", 4);
+        rows++;
+        int is_selected = (i + 1 == hist_off);
+        if (is_selected) {
+            const char *arrow = "\033[1;32m▶ \033[0m\033[1m";
+            write(STDOUT_FILENO, arrow, strlen(arrow));
+        } else {
+            write(STDOUT_FILENO, "  ", 2);
+        }
+        write(STDOUT_FILENO, entries[i], strlen(entries[i]));
+        if (is_selected)
+            write(STDOUT_FILENO, "\033[0m", 4);
+        free(entries[i]);
+    }
+
+    char esc[16];
+    snprintf(esc, sizeof(esc), "\033[%dA", rows);
+    write(STDOUT_FILENO, esc, strlen(esc));
+    *panel_rows = rows;
+}
+
+/* Panel free helper */
+static void panel_free(char **items, int count) {
+    if (!items) return;
+    for (int i = 0; i < count; i++) free(items[i]);
+    free(items);
+}
+
+/* Panel rebuild (call after every buf change) */
+static void panel_rebuild(const char *buf, int len, int pos,
+                          char ***items_out, int *count_out) {
+    /* free old items first — caller handles this */
+    *items_out = NULL;
+    *count_out = 0;
+
+    if (len == 0) return;
+
+    /* find first space to determine if we are in first word */
+    int first_space = -1;
+    for (int i = 0; i < len; i++) {
+        if (buf[i] == ' ') { first_space = i; break; }
+    }
+
+    char **items = malloc(64 * sizeof(char *));
+    if (!items) return;
+    int count = 0;
+    int cap = 64;
+
+    if (first_space == -1) {
+        /* FIRST WORD — command completion */
+        char word[MAXIMUM_INPUT];
+        strncpy(word, buf, len);
+        word[len] = '\0';
+        int wlen = len;
+
+        /* 1. builtins */
+        const char *builtins[] = {
+            "cd","exit","export","pwd","echo","alias","unalias",
+            "source","jobs","fg","bg", NULL
+        };
+        for (int i = 0; builtins[i]; i++) {
+            if (strncmp(builtins[i], word, wlen) == 0) {
+                if (count < 60) items[count++] = strdup(builtins[i]);
+            }
+        }
+
+        /* 2. aliases */
+        const char *alias_names[] = {
+            "ll","la","gs","..","grep","ls","git", NULL
+            /* not ideal — use alias_each if available */
+        };
+        for (int i = 0; alias_names[i]; i++) {
+            if (strncmp(alias_names[i], word, wlen) == 0) {
+                if (alias_expand(alias_names[i]) && count < 60)
+                    items[count++] = strdup(alias_names[i]);
+            }
+        }
+
+        /* 3. PATH executables */
+        char *path_env = getenv("PATH");
+        if (path_env) {
+            char path_copy[4096];
+            strncpy(path_copy, path_env, sizeof(path_copy)-1);
+            char *dir = strtok(path_copy, ":");
+            while (dir && count < 60) {
+                DIR *d = opendir(dir);
+                if (!d) { dir = strtok(NULL, ":"); continue; }
+                struct dirent *ent;
+                while ((ent = readdir(d)) != NULL && count < 60) {
+                    if (strncmp(ent->d_name, word, wlen) != 0) continue;
+                    /* dedup check */
+                    int dup = 0;
+                    for (int j = 0; j < count; j++) {
+                        if (strcmp(items[j], ent->d_name) == 0) { dup=1; break; }
+                    }
+                    if (!dup) items[count++] = strdup(ent->d_name);
+                }
+                closedir(d);
+                dir = strtok(NULL, ":");
+            }
+        }
+
+    } else {
+        /* ARGUMENT — file/dir completion */
+
+        /* get command name */
+        char cmd[256] = {0};
+        strncpy(cmd, buf, first_space < 255 ? first_space : 255);
+
+        /* get current word at cursor */
+        int ws = pos;
+        while (ws > 0 && buf[ws-1] != ' ') ws--;
+        int wlen = pos - ws;
+        char word[MAXIMUM_INPUT] = {0};
+        strncpy(word, buf + ws, wlen);
+
+        /* build glob pattern */
+        char pattern[MAXIMUM_INPUT];
+        int cd_mode = (strcmp(cmd, "cd") == 0);
+
+        if (wlen == 0) {
+            strncpy(pattern, "./*", MAXIMUM_INPUT-1);
+        } else {
+            strncpy(pattern, word, MAXIMUM_INPUT-2);
+            strncat(pattern, "*", MAXIMUM_INPUT-strlen(pattern)-1);
+        }
+
+        glob_t g;
+        int r = glob(pattern, GLOB_MARK|GLOB_TILDE, NULL, &g);
+        if (r == 0) {
+            for (size_t i = 0; i < g.gl_pathc && count < 60; i++) {
+                const char *entry = g.gl_pathv[i];
+                /* cd mode: only dirs (ending in /) */
+                if (cd_mode) {
+                    int elen = strlen(entry);
+                    if (elen == 0 || entry[elen-1] != '/') continue;
+                }
+                items[count++] = strdup(entry);
+            }
+            globfree(&g);
+        }
+    }
+
+    if (count == 0) { free(items); return; }
+
+    /* grow check not needed since we capped at 60 */
+    *items_out = items;
+    *count_out = count;
+}
+
+/* Panel render */
+static void panel_render(char **items, int count, int sel,
+                         int *panel_rows_out) {
+    /* clear previous panel */
+    if (*panel_rows_out > 0) {
+        write(STDOUT_FILENO, "\r", 1);
+        for (int i = 0; i < *panel_rows_out; i++) {
+            write(STDOUT_FILENO, "\033[B", 3);
+            write(STDOUT_FILENO, "\033[K", 3);
+        }
+        char esc_clear[16];
+        snprintf(esc_clear, sizeof(esc_clear), "\033[%dA", *panel_rows_out);
+        write(STDOUT_FILENO, esc_clear, strlen(esc_clear));
+        *panel_rows_out = 0;
+    }
+    if (!items || count == 0) return;
+
+    int term_width = 80;
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+        term_width = ws.ws_col;
+
+    int col_width = 0;
+    for (int i = 0; i < count; i++) {
+        int l = utf8_display_len(items[i]);
+        if (l > col_width) col_width = l;
+    }
+    col_width += 2;
+
+    int cols = term_width / col_width;
+    if (cols < 1) cols = 1;
+    int max_rows = 4;
+    int visible = count < cols * max_rows ? count : cols * max_rows;
+
+    int rows = 0;
+    for (int i = 0; i < visible; i++) {
+        if (i % cols == 0) {
+            write(STDOUT_FILENO, "\n\033[K", 4);
+            rows++;
+        }
+        if (i == sel) {
+            write(STDOUT_FILENO, "\033[7m", 4);
+        } else {
+            write(STDOUT_FILENO, "\033[2;36m", 7);
+        }
+        write(STDOUT_FILENO, items[i], strlen(items[i]));
+        write(STDOUT_FILENO, "\033[0m", 4);
+        int pad = col_width - utf8_display_len(items[i]);
+        for (int p = 0; p < pad; p++) write(STDOUT_FILENO, " ", 1);
+    }
+
+    char esc[16];
+    snprintf(esc, sizeof(esc), "\033[%dA", rows);
+    write(STDOUT_FILENO, esc, strlen(esc));
+    *panel_rows_out = rows;
+}
+
 static void render_search(const char *query, int qlen, const char *match) {
     write(STDOUT_FILENO, "\r", 1);
     write(STDOUT_FILENO, "\033[K", 3);
@@ -94,10 +364,10 @@ static char *search_history_interactive(const char *prompt) {
      * Enters reverse-i-search mode.
      * Returns malloc'd command string if accepted, NULL if cancelled.
      */
-    char query[MAX_INPUT] = {0};
+    char query[MAXIMUM_INPUT] = {0};
     int  qlen = 0;
     int  skip = 0;       /* how many matches to skip (for repeated Ctrl+R) */
-    char match[MAX_INPUT] = {0};
+    char match[MAXIMUM_INPUT] = {0};
 
     render_search(query, qlen, match);
 
@@ -110,7 +380,7 @@ static char *search_history_interactive(const char *prompt) {
             skip++;
             char *h = history_search(query, skip);
             if (h) {
-                strncpy(match, h, MAX_INPUT - 1);
+                strncpy(match, h, MAXIMUM_INPUT - 1);
                 free(h);
             } else {
                 skip--;  /* no more matches, stay */
@@ -140,7 +410,7 @@ static char *search_history_interactive(const char *prompt) {
                 skip = 0;
                 char *h = history_search(query, 0);
                 if (h) {
-                    strncpy(match, h, MAX_INPUT - 1);
+                    strncpy(match, h, MAXIMUM_INPUT - 1);
                     free(h);
                 } else {
                     match[0] = '\0';
@@ -152,13 +422,13 @@ static char *search_history_interactive(const char *prompt) {
 
         /* Printable char — add to query */
         if (c >= 32 && c < 127) {
-            if (qlen < MAX_INPUT - 1) {
+            if (qlen < MAXIMUM_INPUT - 1) {
                 query[qlen++] = c;
                 query[qlen] = '\0';
                 skip = 0;
                 char *h = history_search(query, 0);
                 if (h) {
-                    strncpy(match, h, MAX_INPUT - 1);
+                    strncpy(match, h, MAXIMUM_INPUT - 1);
                     free(h);
                 } else {
                     match[0] = '\0';
@@ -183,10 +453,10 @@ static char *find_suggestion(const char *buf, int len) {
     int wlen = len - ws;
     if (wlen == 0) return NULL;
 
-    char pattern[MAX_INPUT];
+    char pattern[MAXIMUM_INPUT];
     strncpy(pattern, buf + ws, wlen);
     pattern[wlen] = '\0';
-    strncat(pattern, "*", MAX_INPUT - wlen - 1);
+    strncat(pattern, "*", MAXIMUM_INPUT - wlen - 1);
 
     glob_t g;
     if (glob(pattern, GLOB_MARK|GLOB_TILDE, NULL, &g) == 0 && g.gl_pathc > 0) {
@@ -198,28 +468,31 @@ static char *find_suggestion(const char *buf, int len) {
     return NULL;
 }
 
-static void render_with_suggestion(const char *prompt, const char *buf, int len, int pos) {
+static void render_with_suggestion(const char *prompt, const char *buf,
+                                    int len, int pos) {
     render(prompt, buf, len, pos);
-    
-    /* Show ghost suggestion only when cursor is at the end */
-    if (pos == len) {
-        char *sug = find_suggestion(buf, len);
-        if (sug && strlen(sug) > (size_t)len) {
-            const char *ghost = sug + len;  /* part not yet typed */
-            /* print in dim gray */
-            write(STDOUT_FILENO, "\033[2;37m", 7);
-            write(STDOUT_FILENO, ghost, strlen(ghost));
-            write(STDOUT_FILENO, "\033[0m", 4);
-            /* move cursor back to correct position */
-            int ghost_cols = utf8_display_len(ghost);
-            if (ghost_cols > 0) {
-                char esc[16];
-                snprintf(esc, sizeof(esc), "\033[%dD", ghost_cols);
-                write(STDOUT_FILENO, esc, strlen(esc));
-            }
-            free(sug);
-        }
+
+    if (pos != len) return;  /* sadece cursor sondayken */
+
+    char *sug = find_suggestion(buf, len);
+    if (!sug) return;
+
+    int sug_len = strlen(sug);
+    if (sug_len <= len) { free(sug); return; }
+
+    const char *ghost = sug + len;
+    int ghost_cols = utf8_display_len(ghost);
+
+    if (ghost_cols > 0) {
+        write(STDOUT_FILENO, "\033[2;37m", 7);
+        write(STDOUT_FILENO, ghost, strlen(ghost));
+        write(STDOUT_FILENO, "\033[0m", 4);
+        /* imleci geri al */
+        char esc[16];
+        snprintf(esc, sizeof(esc), "\033[%dD", ghost_cols);
+        write(STDOUT_FILENO, esc, strlen(esc));
     }
+    free(sug);
 }
 
 /* Returns the common prefix length of all matches */
@@ -257,13 +530,22 @@ char *read_line(const char *prompt) {
         return NULL;
     }
     
-    char buf[MAX_INPUT] = {0};
+    char buf[MAXIMUM_INPUT] = {0};
     int len = 0;
     int pos = 0;
     int hist_off = 0;
-    char saved[MAX_INPUT] = {0};
+    int history_total = history_count();
+    char saved[MAXIMUM_INPUT] = {0};
     
+    /* Panel state */
+    int panel_sel = -1;
+    int panel_rows = 0;
+    char **panel_items = NULL;
+    int panel_count = 0;
+
+    panel_render(panel_items, panel_count, panel_sel, &panel_rows);
     render_with_suggestion(prompt, buf, len, pos);
+
     
     while (1) {
         char c;
@@ -274,76 +556,43 @@ char *read_line(const char *prompt) {
         
         /* TAB */
         if (c == '\t') {
-            /* First try to accept ghost suggestion if exists */
-            char *sug = find_suggestion(buf, len);
-            if (sug) {
-                int sug_len = strlen(sug);
-                if (sug_len > len && sug_len < MAX_INPUT) {
-                    strncpy(buf, sug, MAX_INPUT - 1);
-                    len = sug_len;
-                    pos = len;
-                    free(sug);
-                    render_with_suggestion(prompt, buf, len, pos);
-                    continue;
-                }
-                free(sug);
-            }
-            
-            /* Then fall through to existing glob completion */
-            int ws = word_start(buf, pos);
-            int wlen = pos - ws;
-            char word[MAX_INPUT];
-            strncpy(word, buf + ws, wlen);
-            word[wlen] = '\0';
-            
-            strncat(word, "*", MAX_INPUT-wlen-1);
-            
-            glob_t g;
-            int r = glob(word, GLOB_MARK|GLOB_TILDE, NULL, &g);
-            
-            if (r != 0 || g.gl_pathc == 0) {
-                write(STDOUT_FILENO, "\a", 1);  /* bell */
-                globfree(&g);
-                continue;
-            }
-            
-            if (g.gl_pathc == 1) {
-                const char *match = g.gl_pathv[0];
-                int match_len = strlen(match);
-                int tail = len - pos;
-                memmove(buf + ws + match_len, buf + pos, tail);
-                memcpy(buf + ws, match, match_len);
-                len = ws + match_len + tail;
-                pos = ws + match_len;
-                buf[len] = '\0';
-            } else {
-                int cp = common_prefix_len(&g);
-                if (cp > wlen) {
-                    const char *first = g.gl_pathv[0];
+            if (panel_count == 1 && panel_sel == -1) {
+                /* accept single item */
+                if (panel_items && panel_count > 0) {
+                    int ws = pos;
+                    while (ws > 0 && buf[ws-1] != ' ') ws--;
+                    const char *match = panel_items[0];
+                    int match_len = strlen(match);
                     int tail = len - pos;
-                    memmove(buf + ws + cp, buf + pos, tail);
-                    memcpy(buf + ws, first, cp);
-                    len = ws + cp + tail;
-                    pos = ws + cp;
+                    memmove(buf + ws + match_len, buf + pos, tail);
+                    memcpy(buf + ws, match, match_len);
+                    len = ws + match_len + tail;
+                    pos = ws + match_len;
                     buf[len] = '\0';
-                } else {
-                    write(STDOUT_FILENO, "\r\n", 2);
-                    for (size_t i = 0; i < g.gl_pathc; i++) {
-                        write(STDOUT_FILENO, g.gl_pathv[i], strlen(g.gl_pathv[i]));
-                        write(STDOUT_FILENO, "  ", 2);
-                    }
-                    write(STDOUT_FILENO, "\r\n", 2);
+                    panel_free(panel_items, panel_count);
+                    panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+                    panel_sel = -1;
+                    panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                    render_with_suggestion(prompt, buf, len, pos);
+
                 }
+                continue;
+            } else if (panel_sel == -1 && panel_count > 0) {
+                panel_sel = 0;
+            } else if (panel_sel >= 0) {
+                panel_sel = (panel_sel + 1) % panel_count;
             }
-            
-            globfree(&g);
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
         
         /* Ctrl+D */
         if (c == 4) {
             if (len == 0) {
+                panel_free(panel_items, panel_count);
+                panel_render(NULL, 0, -1, &panel_rows);  /* clear panel */
                 tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
                 return NULL;
             } else {
@@ -353,25 +602,52 @@ char *read_line(const char *prompt) {
         
         /* Ctrl+C */
         if (c == 3) {
-            memset(buf, 0, MAX_INPUT);
+            memset(buf, 0, MAXIMUM_INPUT);
             len = 0;
             pos = 0;
             hist_off = 0;
-            memset(saved, 0, MAX_INPUT);
+            memset(saved, 0, MAXIMUM_INPUT);
+            panel_free(panel_items, panel_count);
+            panel_items = NULL; panel_count = 0; panel_sel = -1;
+            panel_render(NULL, 0, -1, &panel_rows);
             write(STDOUT_FILENO, "\n", 1);
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
             continue;
         }
         
         /* Enter */
         if (c == '\r' || c == '\n') {
-            buf[len] = '\0';
-            tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
-            write(STDOUT_FILENO, "\r\n", 2);
-            if (len > 0) {
-                history_add(buf);
+            if (panel_sel >= 0 && panel_items) {
+                /* insert selected item into buf replacing current word */
+                int ws = pos;
+                while (ws > 0 && buf[ws-1] != ' ') ws--;
+                const char *match = panel_items[panel_sel];
+                int match_len = strlen(match);
+                int tail = len - pos;
+                memmove(buf + ws + match_len, buf + pos, tail);
+                memcpy(buf + ws, match, match_len);
+                len = ws + match_len + tail;
+                pos = ws + match_len;
+                buf[len] = '\0';
+                panel_free(panel_items, panel_count);
+                panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+                panel_sel = -1;
+                panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                render_with_suggestion(prompt, buf, len, pos);
+                continue;
+            } else {
+                buf[len] = '\0';
+                panel_free(panel_items, panel_count);
+                panel_render(NULL, 0, -1, &panel_rows);  /* clear panel */
+                history_total++;   /* we just added one */
+                tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
+                write(STDOUT_FILENO, "\r\n", 2);
+                if (len > 0) {
+                    history_add(buf);
+                }
+                return strdup(buf);
             }
-            return strdup(buf);
         }
         
         /* Backspace */
@@ -383,24 +659,55 @@ char *read_line(const char *prompt) {
                 pos -= back;
                 if (len == 0) {
                     hist_off = 0;
-                    memset(saved, 0, MAX_INPUT);
+                    memset(saved, 0, MAXIMUM_INPUT);
                 }
             }
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
         
         /* Ctrl+A */
         if (c == 1) {
             pos = 0;
+            if (panel_sel >= 0) {
+                panel_sel = -1;
+                panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                render_with_suggestion(prompt, buf, len, pos);
+
+                continue;
+            }
             render_with_suggestion(prompt, buf, len, pos);
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+            render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
         
         /* Ctrl+E */
         if (c == 5) {
             pos = len;
+            if (panel_sel >= 0) {
+                panel_sel = -1;
+                panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                render_with_suggestion(prompt, buf, len, pos);
+
+                continue;
+            }
             render_with_suggestion(prompt, buf, len, pos);
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+            render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
         
@@ -410,7 +717,20 @@ char *read_line(const char *prompt) {
                 pos += utf8_char_len(buf, pos);
                 if (pos > len) pos = len;
             }
+            if (panel_sel >= 0) {
+                panel_sel = -1;
+                panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                render_with_suggestion(prompt, buf, len, pos);
+
+                continue;
+            }
             render_with_suggestion(prompt, buf, len, pos);
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+            render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
         
@@ -420,6 +740,18 @@ char *read_line(const char *prompt) {
                 pos -= utf8_prev_char_len(buf, pos);
                 if (pos < 0) pos = 0;
             }
+            if (panel_sel >= 0) {
+                panel_sel = -1;
+                panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                render_with_suggestion(prompt, buf, len, pos);
+
+                continue;
+            }
+            render_with_suggestion(prompt, buf, len, pos);
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
             continue;
         }
@@ -429,18 +761,22 @@ char *read_line(const char *prompt) {
             char *result = search_history_interactive(prompt);
             if (result) {
                 /* put result into buf */
-                strncpy(buf, result, MAX_INPUT - 1);
-                buf[MAX_INPUT - 1] = '\0';
+                strncpy(buf, result, MAXIMUM_INPUT - 1);
+                buf[MAXIMUM_INPUT - 1] = '\0';
                 len = strlen(buf);
                 pos = len;
                 free(result);
             } else {
                 /* cancelled — clear buf */
-                memset(buf, 0, MAX_INPUT);
+                memset(buf, 0, MAXIMUM_INPUT);
                 len = 0;
                 pos = 0;
             }
             hist_off = 0;
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
             continue;
         }
@@ -454,67 +790,162 @@ char *read_line(const char *prompt) {
             if (seq[0] == '[') {
                 /* Yukarı ok */
                 if (seq[1] == 'A') {
-                    if (hist_off == 0) {
-                        strncpy(saved, buf, MAX_INPUT - 1);
-                        saved[MAX_INPUT - 1] = '\0';
-                    }
-                    hist_off++;
-                    char *h = history_get(hist_off);
-                    if (h) {
-                        strncpy(buf, h, MAX_INPUT - 1);
-                        buf[MAX_INPUT - 1] = '\0';
-                        len = strlen(buf);
-                        pos = len;
-                        free(h);
+                    if (panel_sel >= 0) {
+                        panel_sel--;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+                        continue;
                     } else {
-                        hist_off--;
+                        if (hist_off == 0) {
+                            strncpy(saved, buf, MAXIMUM_INPUT - 1);
+                            saved[MAXIMUM_INPUT - 1] = '\0';
+                        }
+                        hist_off++;
+                        char *h = history_get(hist_off);
+                        if (h) {
+                            strncpy(buf, h, MAXIMUM_INPUT - 1);
+                            buf[MAXIMUM_INPUT - 1] = '\0';
+                            len = strlen(buf);
+                            pos = len;
+                            free(h);
+                        } else {
+                            hist_off--;
+                        }
+                        panel_show_history(hist_off, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
+                        continue;
                     }
-                    render_with_suggestion(prompt, buf, len, pos);
-                    continue;
                 }
                 
                 /* Aşağı ok */
                 if (seq[1] == 'B') {
-                    if (hist_off == 0) {
+                    if (panel_sel == -1 && panel_count > 0 && hist_off == 0) {
+                        panel_sel = 0;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
                         continue;
-                    }
-                    hist_off--;
-                    if (hist_off == 0) {
-                        strncpy(buf, saved, MAX_INPUT - 1);
-                        buf[MAX_INPUT - 1] = '\0';
-                        len = strlen(buf);
-                        pos = len;
+                    } else if (panel_sel >= 0) {
+                        panel_sel = (panel_sel + 1) % panel_count;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
+                        continue;
                     } else {
-                        char *h = history_get(hist_off);
-                        if (h) {
-                            strncpy(buf, h, MAX_INPUT - 1);
-                            buf[MAX_INPUT - 1] = '\0';
+                        if (hist_off == 0) {
+                            continue;
+                        }
+                        hist_off--;
+                        if (hist_off == 0) {
+                            strncpy(buf, saved, MAXIMUM_INPUT - 1);
+                            buf[MAXIMUM_INPUT - 1] = '\0';
                             len = strlen(buf);
                             pos = len;
-                            free(h);
+                        } else {
+                            char *h = history_get(hist_off);
+                            if (h) {
+                                strncpy(buf, h, MAXIMUM_INPUT - 1);
+                                buf[MAXIMUM_INPUT - 1] = '\0';
+                                len = strlen(buf);
+                                pos = len;
+                                free(h);
+                            }
                         }
+                        render_with_suggestion(prompt, buf, len, pos);
+                        if (hist_off > 0)
+                            panel_show_history(hist_off, &panel_rows);
+                        else {
+                            /* clear history panel, show completion panel */
+                            if (panel_rows > 0) {  /* already cleared by panel_show_history */
+                                /* panel_rows already 0 after clear */
+                            }
+                            panel_free(panel_items, panel_count);
+                            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+                            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        }
+                        continue;
                     }
-                    render_with_suggestion(prompt, buf, len, pos);
-                    continue;
                 }
                 
                 /* Sağ ok */
                 if (seq[1] == 'C') {
-                    if (pos < len) {
-                        pos += utf8_char_len(buf, pos);
-                        if (pos > len) pos = len;
+                    if (panel_sel >= 0) {
+                        int term_width = 80;
+                        struct winsize ws;
+                        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+                            term_width = ws.ws_col;
+                        int col_width = 0;
+                        for (int i = 0; i < panel_count; i++) {
+                            int l = utf8_display_len(panel_items[i]);
+                            if (l > col_width) col_width = l;
+                        }
+                        col_width += 2;
+                        int cols = term_width / col_width;
+                        if (cols < 1) cols = 1;
+                        panel_sel = (panel_sel + 1) % panel_count;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
+                        continue;
+                    } else {
+                        if (pos < len) {
+                            pos += utf8_char_len(buf, pos);
+                            if (pos > len) pos = len;
+                        }
+                        render_with_suggestion(prompt, buf, len, pos);
+                        panel_free(panel_items, panel_count);
+                        panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+                        panel_sel = -1;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
+                        continue;
                     }
-                    render_with_suggestion(prompt, buf, len, pos);
-                    continue;
                 }
                 
                 /* Sol ok */
                 if (seq[1] == 'D') {
-                    if (pos > 0) {
-                        pos -= utf8_prev_char_len(buf, pos);
-                        if (pos < 0) pos = 0;
+                    if (panel_sel >= 0) {
+                        int term_width = 80;
+                        struct winsize ws;
+                        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0)
+                            term_width = ws.ws_col;
+                        int col_width = 0;
+                        for (int i = 0; i < panel_count; i++) {
+                            int l = utf8_display_len(panel_items[i]);
+                            if (l > col_width) col_width = l;
+                        }
+                        col_width += 2;
+                        int cols = term_width / col_width;
+                        if (cols < 1) cols = 1;
+                        panel_sel = (panel_sel - 1 + panel_count) % panel_count;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
+                        continue;
+                    } else {
+                        if (pos > 0) {
+                            pos -= utf8_prev_char_len(buf, pos);
+                            if (pos < 0) pos = 0;
+                        }
+                        render_with_suggestion(prompt, buf, len, pos);
+                        panel_free(panel_items, panel_count);
+                        panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+                        panel_sel = -1;
+                        panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                        render_with_suggestion(prompt, buf, len, pos);
+
+                        continue;
                     }
+                }
+            } else {
+                /* plain ESC */
+                if (panel_sel >= 0) {
+                    panel_sel = -1;
+                    panel_render(panel_items, panel_count, panel_sel, &panel_rows);
                     render_with_suggestion(prompt, buf, len, pos);
+
                     continue;
                 }
             }
@@ -523,12 +954,20 @@ char *read_line(const char *prompt) {
         
         /* ASCII printable */
         if ((unsigned char)c >= 32 && c < 127) {
-            if (len < MAX_INPUT - 1) {
+            if (panel_sel >= 0) {
+                panel_sel = -1;
+            }
+            if (len < MAXIMUM_INPUT - 1) {
                 memmove(buf + pos + 1, buf + pos, len - pos);
                 buf[pos] = c;
                 len++; pos++;
             }
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
 
@@ -541,7 +980,7 @@ char *read_line(const char *prompt) {
             else if (uc >= 0xE0) nb = 3;
             else                  nb = 2;
 
-            if (len + nb < MAX_INPUT - 1) {
+            if (len + nb < MAXIMUM_INPUT - 1) {
                 /* read remaining bytes */
                 char seq[4];
                 seq[0] = c;
@@ -556,7 +995,12 @@ char *read_line(const char *prompt) {
                 len += nb;
                 pos += nb;
             }
+            panel_free(panel_items, panel_count);
+            panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+            panel_sel = -1;
+            panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
+
             continue;
         }
     }

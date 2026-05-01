@@ -114,6 +114,26 @@ char *history_search(const char *query, int skip) {
     return NULL;
 }
 
+int history_count(void) {
+    if (!db) return 0;
+    
+    const char *sql = "SELECT COUNT(*) FROM history;";
+    sqlite3_stmt *stmt;
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return 0;
+    }
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        int count = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+        return count;
+    }
+    
+    sqlite3_finalize(stmt);
+    return 0;
+}
+
 void history_close(void) {
     if (db) {
         sqlite3_close(db);

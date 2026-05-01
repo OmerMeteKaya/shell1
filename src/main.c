@@ -2,6 +2,7 @@
 // Created by mete on 23.04.2026.
 //
 
+#include <time.h>
 extern int last_exit_status;
 
 #include <stdio.h>
@@ -14,6 +15,7 @@ extern int last_exit_status;
 #include "../include/input.h"
 #include "../include/alias.h"
 #include "../include/rc.h"
+#include "../include/plugin.h"
 
 void signals_init(void);
 void jobs_init(void);
@@ -38,6 +40,13 @@ int main() {
     // Alias
     alias_init();
 
+    // Plugin
+    char plugin_dir[512];
+    if (home)
+        snprintf(plugin_dir, sizeof(plugin_dir), "%s/.mysh/plugins", home);
+    else
+        snprintf(plugin_dir, sizeof(plugin_dir), ".mysh/plugins");
+    plugins_init(plugin_dir);
     char rc_path[512];
     if (home) {
         snprintf(rc_path, sizeof(rc_path), "%s/.myshrc", home);
@@ -55,17 +64,59 @@ int main() {
     while (1) {
         char prompt[512];
         char cwd[256];
+        const char *home = getenv("HOME");
+
         if (getcwd(cwd, sizeof(cwd))) {
-            const char *home = getenv("HOME");
             char display[256];
-            if (home && strncmp(cwd, home, strlen(home)) == 0) {
-                snprintf(display, sizeof(display), "~%s", cwd + strlen(home));
+            if (home && strcmp(cwd, home) == 0) {
+                strncpy(display, "~", sizeof(display));
             } else {
-                strncpy(display, cwd, sizeof(display));
+                char *last = strrchr(cwd, '/');
+                if (last && *(last+1))
+                    strncpy(display, last+1, sizeof(display));
+                else
+                    strncpy(display, cwd, sizeof(display));
             }
-            snprintf(prompt, sizeof(prompt), "%s> ", display);
+
+            /* plugin hook — git branch vb. */
+            char *left = hook_prompt_left();
+            if (left) {
+                /* git varsa: ➜  HH:MM user dir (branch) */
+                /* saat */
+                time_t t = time(NULL);
+                struct tm *tm = localtime(&t);
+                char timebuf[8];
+                strftime(timebuf, sizeof(timebuf), "%H:%M", tm);
+
+                snprintf(prompt, sizeof(prompt),
+                    "\033[1;32m➜\033[0m  "        /* yeşil ok */
+                    "\033[0;37m%s\033[0m "         /* gri saat */
+                    "\033[1;36m%s\033[0m "         /* cyan kullanıcı */
+                    "\033[1;34m%s\033[0m "         /* mavi dizin */
+                    "%s"                           /* git (zaten renkli) */
+                    "\033[0m> ",                   /* reset + > */
+                    timebuf,
+                    getenv("USER") ? getenv("USER") : "",
+                    display,
+                    left);
+                free(left);
+            } else {
+                time_t t = time(NULL);
+                struct tm *tm = localtime(&t);
+                char timebuf[8];
+                strftime(timebuf, sizeof(timebuf), "%H:%M", tm);
+
+                snprintf(prompt, sizeof(prompt),
+                    "\033[1;32m➜\033[0m  "
+                    "\033[0;37m%s\033[0m "
+                    "\033[1;36m%s\033[0m "
+                    "\033[1;34m%s\033[0m> ",
+                    timebuf,
+                    getenv("USER") ? getenv("USER") : "",
+                    display);
+            }
         } else {
-            snprintf(prompt, sizeof(prompt), "mysh> ");
+            snprintf(prompt, sizeof(prompt), "➜ mysh> ");
         }
         char *input = read_line(prompt);
         if (!input) {
@@ -129,6 +180,6 @@ int main() {
     }
     history_close();
     alias_free();
-    
+    plugins_unload();
     return 0;
 }

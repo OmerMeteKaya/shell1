@@ -19,5 +19,6 @@ void  alias_add(const char *name, const char *value);
 char *alias_expand(const char *name);  /* NULL if not found */
 void  alias_list(void);
 void  alias_free(void);
+void  alias_each(void (*cb)(const char *name, void *ud), void *ud);
 
 #endif

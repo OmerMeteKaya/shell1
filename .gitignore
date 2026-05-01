@@ -1,5 +1,4 @@
 .aider*
-a.out
+.gitignore
 .idea
-mysh
-+%s)
+./mysh

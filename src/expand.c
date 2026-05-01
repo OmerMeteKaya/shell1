@@ -123,7 +123,6 @@ static char *run_command_substitution(const char *cmd_str) {
 }
 
 char *expand_word(const char *word, int last_exit_status) {
-    fprintf(stderr, "EXPAND: '%s'\n", word);
     if (!word) return NULL;
     
     size_t word_len = strlen(word);

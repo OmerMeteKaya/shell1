@@ -23,4 +23,8 @@ add_executable(shell
         src/alias.c
         include/alias.h
         src/rc.c
-        include/rc.h)
+        include/rc.h
+        plugins/git.c
+        src/plugin.c
+        src/highlight.c
+        include/highlight.h)

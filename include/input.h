@@ -7,7 +7,7 @@
 #ifndef INPUT_H
 #define INPUT_H
 
-#define MAX_INPUT 4096
+#define MAXIMUM_INPUT 4096
 
 
 char *read_line(const char *prompt);
@@ -18,6 +18,7 @@ void  history_add(const char *line);
 char *history_get(int offset);
 char *history_search_prefix(const char *prefix);  /* yeni fonksiyon */
 char *history_search(const char *query, int skip);
+int   history_count(void);
 void  history_close(void);
 
 #endif
