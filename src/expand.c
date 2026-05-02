@@ -10,8 +10,49 @@
 #include <stdio.h>
 #include <glob.h>
 #include <sys/wait.h>
-#include <fcntl.h>
-#include "../include/rc.h"
+
+
+#define MAX_LOCAL_VARS 256
+typedef struct {
+    char name[64];
+    char value[256];
+    int  active;
+} LocalVar;
+
+static LocalVar local_vars[MAX_LOCAL_VARS];
+static int local_var_count = 0;
+
+void local_var_set(const char *name, const char *value) {
+    for (int i = 0; i < local_var_count; i++) {
+        if (local_vars[i].active &&
+            strcmp(local_vars[i].name, name) == 0) {
+            strncpy(local_vars[i].value, value,
+                    sizeof(local_vars[i].value)-1);
+            return;
+            }
+    }
+    if (local_var_count < MAX_LOCAL_VARS) {
+        strncpy(local_vars[local_var_count].name, name,
+                sizeof(local_vars[0].name)-1);
+        strncpy(local_vars[local_var_count].value, value,
+                sizeof(local_vars[0].value)-1);
+        local_vars[local_var_count].active = 1;
+        local_var_count++;
+    }
+}
+
+/* get variable — local first, then env */
+const char *var_get(const char *name) {
+    for (int i = 0; i < local_var_count; i++) {
+        if (local_vars[i].active &&
+            strcmp(local_vars[i].name, name) == 0)
+            return local_vars[i].value;
+    }
+    return getenv(name);
+}
+
+
+
 
 static char *itoa(int value) {
     static char buf[32];
@@ -41,6 +82,349 @@ static int append_str(char **buf, size_t *len, size_t *capacity, const char *str
     memcpy(*buf + *len, str, str_len);
     *len += str_len;
     return 0;
+}
+
+/* Simple arithmetic evaluator — supports +, -, *, /, %, (, ) */
+/* Returns result as long, sets *err=1 on error */
+
+typedef struct {
+    const char *p;
+    int err;
+} AEval;
+
+static long ae_expr(AEval *a);   /* forward declaration */
+
+static void ae_skip_ws(AEval *a) {
+    while (*a->p == ' ' || *a->p == '\t') a->p++;
+}
+
+static long ae_number(AEval *a) {
+    ae_skip_ws(a);
+    if (*a->p == '(') {
+        a->p++;
+        long v = ae_expr(a);
+        ae_skip_ws(a);
+        if (*a->p == ')') a->p++;
+        else a->err = 1;
+        return v;
+    }
+    int neg = 0;
+    if (*a->p == '-') { neg = 1; a->p++; }
+    else if (*a->p == '+') { a->p++; }
+    if (!isdigit((unsigned char)*a->p)) { a->err = 1; return 0; }
+    long v = 0;
+    while (isdigit((unsigned char)*a->p))
+        v = v * 10 + (*a->p++ - '0');
+    return neg ? -v : v;
+}
+
+static long ae_term(AEval *a) {
+    long v = ae_number(a);
+    while (1) {
+        ae_skip_ws(a);
+        if (*a->p == '*') { a->p++; v *= ae_number(a); }
+        else if (*a->p == '/') {
+            a->p++;
+            long d = ae_number(a);
+            if (d == 0) { a->err = 1; return 0; }
+            v /= d;
+        }
+        else if (*a->p == '%') {
+            a->p++;
+            long d = ae_number(a);
+            if (d == 0) { a->err = 1; return 0; }
+            v %= d;
+        }
+        else break;
+    }
+    return v;
+}
+
+static long ae_expr(AEval *a) {
+    long v = ae_term(a);
+    while (1) {
+        ae_skip_ws(a);
+        if (*a->p == '+') { a->p++; v += ae_term(a); }
+        else if (*a->p == '-') { a->p++; v -= ae_term(a); }
+        else break;
+    }
+    return v;
+}
+
+static char *eval_arithmetic(const char *expr) {
+    fprintf(stderr, "ARITH expr: '%s'\n", expr); /* debug — sonra sil */
+
+    char expanded[1024] = {0};
+    const char *p = expr;
+    int ei = 0;
+
+    while (*p && ei < 1020) {
+        if (*p == '$') {
+            p++;
+            if (isalpha((unsigned char)*p) || *p == '_') {
+                char varname[64] = {0};
+                int vi = 0;
+                while ((isalnum((unsigned char)*p) || *p == '_') && vi < 63)
+                    varname[vi++] = *p++;
+                const char *val = var_get(varname);
+                if (val) {
+                    int vl = strlen(val);
+                    if (ei + vl < 1020) {
+                        memcpy(expanded + ei, val, vl);
+                        ei += vl;
+                    }
+                } else {
+                    /* undefined var → 0 */
+                    expanded[ei++] = '0';
+                }
+            }
+        } else if (isalpha((unsigned char)*p) || *p == '_') {
+            /* bare identifier without $ — expand from env or local vars */
+            char varname[64] = {0};
+            int vi = 0;
+            while ((isalnum((unsigned char)*p) || *p == '_') && vi < 63)
+                varname[vi++] = *p++;
+            const char *val = var_get(varname);
+            if (val) {
+                int vl = strlen(val);
+                if (ei + vl < 1020) {
+                    memcpy(expanded + ei, val, vl);
+                    ei += vl;
+                }
+            } else {
+                /* undefined → 0 */
+                expanded[ei++] = '0';
+            }
+        } else {
+            expanded[ei++] = *p++;
+        }
+    }
+    expanded[ei] = '\0';
+
+    AEval a = { expanded, 0 };
+    long result = ae_expr(&a);
+    if (a.err) return strdup("0");
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%ld", result);
+    return strdup(buf);
+}
+
+/* Returns malloc'd array of expanded strings, sets *count */
+static char **brace_expand(const char *word, int *count) {
+    *count = 0;
+
+    /* find opening brace not preceded by $ */
+    const char *open = NULL;
+    for (const char *p = word; *p; p++) {
+        if (*p == '{' && (p == word || *(p-1) != '$')) {
+            open = p;
+            break;
+        }
+    }
+
+    if (!open) {
+        /* no brace — return copy of word */
+        char **r = malloc(sizeof(char*));
+        if (!r) return NULL;
+        r[0] = strdup(word);
+        *count = 1;
+        return r;
+    }
+
+    /* find matching close brace */
+    const char *close = NULL;
+    int depth = 1;
+    for (const char *p = open + 1; *p; p++) {
+        if (*p == '{') depth++;
+        else if (*p == '}') {
+            depth--;
+            if (depth == 0) { close = p; break; }
+        }
+    }
+
+    if (!close) {
+        /* unmatched brace — return as-is */
+        char **r = malloc(sizeof(char*));
+        if (!r) return NULL;
+        r[0] = strdup(word);
+        *count = 1;
+        return r;
+    }
+
+    /* prefix: everything before { */
+    int prefix_len = open - word;
+    char prefix[1024] = {0};
+    strncpy(prefix, word, prefix_len);
+
+    /* suffix: everything after } */
+    const char *suffix = close + 1;
+
+    /* content between braces */
+    int content_len = close - open - 1;
+    char content[1024] = {0};
+    strncpy(content, open + 1, content_len);
+
+    /* check for sequence: {a..z} or {1..5} */
+    char seq_from[64] = {0}, seq_to[64] = {0};
+    int is_sequence = 0;
+    char *dotdot = strstr(content, "..");
+    if (dotdot) {
+        strncpy(seq_from, content, dotdot - content);
+        strncpy(seq_to, dotdot + 2, sizeof(seq_to)-1);
+        is_sequence = 1;
+    }
+
+    char **items = NULL;
+    int item_count = 0;
+    int item_cap = 16;
+    items = malloc(item_cap * sizeof(char*));
+    if (!items) return NULL;
+
+    if (is_sequence) {
+        /* numeric sequence */
+        int a = atoi(seq_from), b = atoi(seq_to);
+        /* char sequence */
+        int is_char = (!isdigit((unsigned char)seq_from[0]) &&
+                       strlen(seq_from)==1 && strlen(seq_to)==1);
+        if (is_char) {
+            char ca = seq_from[0], cb = seq_to[0];
+            int step = (ca <= cb) ? 1 : -1;
+            for (char c = ca; c != cb + step; c += step) {
+                if (item_count >= item_cap) {
+                    item_cap *= 2;
+                    char **tmp = realloc(items, item_cap*sizeof(char*));
+                    if (!tmp) break;
+                    items = tmp;
+                }
+                char item[2] = {c, '\0'};
+                char full[2048];
+                snprintf(full, sizeof(full), "%s%s%s", prefix, item, suffix);
+                items[item_count++] = strdup(full);
+            }
+        } else {
+            int step = (a <= b) ? 1 : -1;
+            for (int i = a; i != b + step; i += step) {
+                if (item_count >= item_cap) {
+                    item_cap *= 2;
+                    char **tmp = realloc(items, item_cap*sizeof(char*));
+                    if (!tmp) break;
+                    items = tmp;
+                }
+                char item[32];
+                snprintf(item, sizeof(item), "%d", i);
+                char full[2048];
+                snprintf(full, sizeof(full), "%s%s%s", prefix, item, suffix);
+                items[item_count++] = strdup(full);
+            }
+        }
+    } else {
+        /* comma-separated list — split by comma, respecting nested braces */
+        char *parts[64];
+        int nparts = 0;
+        char buf2[1024];
+        strncpy(buf2, content, sizeof(buf2)-1);
+        char *p2 = buf2;
+        char *part_start = p2;
+        int d2 = 0;
+        while (*p2) {
+            if (*p2 == '{') d2++;
+            else if (*p2 == '}') d2--;
+            else if (*p2 == ',' && d2 == 0) {
+                *p2 = '\0';
+                if (nparts < 64) parts[nparts++] = part_start;
+                part_start = p2 + 1;
+            }
+            p2++;
+        }
+        if (nparts < 64) parts[nparts++] = part_start;
+
+        for (int i = 0; i < nparts; i++) {
+            if (item_count >= item_cap) {
+                item_cap *= 2;
+                char **tmp = realloc(items, item_cap*sizeof(char*));
+                if (!tmp) break;
+                items = tmp;
+            }
+            char full[2048];
+            snprintf(full, sizeof(full), "%s%s%s", prefix, parts[i], suffix);
+            items[item_count++] = strdup(full);
+        }
+    }
+
+    *count = item_count;
+    return items;
+}
+
+Token *brace_expand_tokens(Token *toks, int *ntokens) {
+    if (!toks || *ntokens == 0) return toks;
+
+    /* count how many tokens we'll need after expansion */
+    Token *new_toks = malloc(*ntokens * 8 * sizeof(Token));
+    if (!new_toks) return toks;
+    int new_count = 0;
+    int new_cap = *ntokens * 8;
+
+    for (int i = 0; i < *ntokens; i++) {
+        if (toks[i].type != TOK_WORD || !toks[i].value) {
+            /* non-word token — copy as-is */
+            if (new_count >= new_cap) {
+                new_cap *= 2;
+                Token *tmp = realloc(new_toks, new_cap * sizeof(Token));
+                if (!tmp) break;
+                new_toks = tmp;
+            }
+            new_toks[new_count++] = toks[i];
+            continue;
+        }
+
+        /* check if token contains unquoted brace */
+        int has_brace = 0;
+        for (const char *p = toks[i].value; *p; p++) {
+            if (*p == '{' && (p == toks[i].value || *(p-1) != '$')) {
+                has_brace = 1; break;
+            }
+        }
+
+        if (!has_brace) {
+            if (new_count >= new_cap) {
+                new_cap *= 2;
+                Token *tmp = realloc(new_toks, new_cap * sizeof(Token));
+                if (!tmp) break;
+                new_toks = tmp;
+            }
+            new_toks[new_count++] = toks[i];
+            continue;
+        }
+
+        /* expand braces */
+        int exp_count = 0;
+        char **expanded = brace_expand(toks[i].value, &exp_count);
+        if (!expanded || exp_count == 0) {
+            new_toks[new_count++] = toks[i];
+            continue;
+        }
+
+        /* free original token value */
+        free(toks[i].value);
+
+        for (int j = 0; j < exp_count; j++) {
+            if (new_count >= new_cap) {
+                new_cap *= 2;
+                Token *tmp = realloc(new_toks, new_cap * sizeof(Token));
+                if (!tmp) { free(expanded[j]); continue; }
+                new_toks = tmp;
+            }
+            new_toks[new_count].type = TOK_WORD;
+            new_toks[new_count].value = expanded[j];
+            new_count++;
+        }
+        free(expanded);
+    }
+
+    free(toks);
+    *ntokens = new_count;
+    return new_toks;
 }
 
 static char *run_command_substitution(const char *cmd_str) {
@@ -206,6 +590,32 @@ char *expand_word(const char *word, int last_exit_status) {
                 continue;
             }
             
+            /* $((...)) arithmetic expansion */
+            if (*p == '(' && *(p+1) == '(') {
+                p += 2;  /* skip (( */
+                const char *expr_start = p;
+                int depth = 2;
+                while (*p && depth > 0) {
+                    if (*p == '(') depth++;
+                    else if (*p == ')') depth--;
+                    p++;
+                }
+                /* p now points after )) */
+                int expr_len = (p - 2) - expr_start;
+                if (expr_len > 0) {
+                    char *expr = strndup(expr_start, expr_len);
+                    if (expr) {
+                        char *result = eval_arithmetic(expr);
+                        free(expr);
+                        if (result) {
+                            append_str(&buf, &len, &capacity, result);
+                            free(result);
+                        }
+                    }
+                }
+                continue;
+            }
+
             // $(...) command substitution
             if (*p == '(') {
                 p++;  /* skip '(' */
@@ -242,7 +652,7 @@ char *expand_word(const char *word, int last_exit_status) {
                     if (var_len > 0) {
                         char *var_name = strndup(var_start, var_len);
                         if (var_name) {
-                            const char *var_value = getenv(var_name);
+                            const char *var_value = var_get(var_name);
                             if (!var_value) var_value = "";
                             
                             if (append_str(&buf, &len, &capacity, var_value) < 0) {
@@ -270,7 +680,7 @@ char *expand_word(const char *word, int last_exit_status) {
                 if (var_len > 0) {
                     char *var_name = strndup(var_start, var_len);
                     if (var_name) {
-                        const char *var_value = getenv(var_name);
+                        const char *var_value = var_get(var_name);
                         if (!var_value) var_value = "";
                         
                         if (append_str(&buf, &len, &capacity, var_value) < 0) {
@@ -341,7 +751,10 @@ void expand_tokens(Token *toks, int ntokens, int last_exit_status) {
 Token *glob_expand_tokens(Token *toks, int *ntokens, int last_exit_status) {
     if (!toks || !ntokens) return NULL;
     
-    // Önce değişken genişletmesi yap
+    // Önce brace genişletmesi yap
+    toks = brace_expand_tokens(toks, ntokens);
+    
+    // Sonra değişken genişletmesi yap
     expand_tokens(toks, *ntokens, last_exit_status);
     
     // Genişletilmiş token sayısını hesapla

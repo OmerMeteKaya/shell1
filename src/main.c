@@ -23,8 +23,6 @@ void jobs_init(void);
 
 
 int main() {
-
-    
     // Initialize signals and jobs
     signals_init();
     jobs_init();
@@ -175,19 +173,36 @@ int main() {
         if (strlen(input) == 0) {
             continue;
         }
-        
-        // Lexical analysis
         int ntokens;
         Token *tokens = lex(input, &ntokens);
+
+        int is_assignment = 0;
+        if (ntokens == 2 &&              /* sadece bir token + EOF */
+            tokens[0].type == TOK_WORD &&
+            tokens[0].value) {
+            char *eq = strchr(tokens[0].value, '=');
+            if (eq && eq != tokens[0].value) {  /* = var ve başta değil */
+                /* KEY=VALUE — local variable set */
+                *eq = '\0';
+                char *key = tokens[0].value;
+                char *val = eq + 1;
+                extern void local_var_set(const char *name, const char *value);
+                local_var_set(key, val);
+                *eq = '=';  /* restore */
+                is_assignment = 1;
+            }
+            }
+
+        // Lexical analysis
+
+
         if (!tokens) {
             fprintf(stderr, "Error during lexical analysis\n");
             continue;
         }
 
         tokens = glob_expand_tokens(tokens, &ntokens, last_exit_status);
-       /* for (int i = 0; i < ntokens; i++)
-            fprintf(stderr, "TOK[%d]: type=%d val=%s\n", i, tokens[i].type, tokens[i].value ? tokens[i].value : "null");
-        if (!tokens) continue;*/
+
 
         if (ntokens > 0 && tokens[0].type == TOK_WORD && tokens[0].value) {
             char *expanded = alias_expand(tokens[0].value);
@@ -203,6 +218,7 @@ int main() {
                 }
                 tokens_free(tokens, ntokens);
                 tokens = lex(combined, &ntokens);
+                tokens = brace_expand_tokens(tokens, &ntokens);
                 if (!tokens) continue;
                 tokens = glob_expand_tokens(tokens, &ntokens, last_exit_status);
                 if (!tokens) continue;
@@ -210,17 +226,20 @@ int main() {
         }
 
         // Execution
-        CmdList *list = parse_list(tokens, ntokens);
-        if (list) {
-            execute_list(list);
-            cmdlist_free(list);
+        if (!is_assignment) {
+            CmdList *list = parse_list(tokens, ntokens);
+            if (list) {
+                execute_list(list);
+                cmdlist_free(list);
+            }
         }
         // Cleanup
         tokens_free(tokens, ntokens);
         free(input);
     }
-    history_close();
-    alias_free();
-    plugins_unload();
-    return 0;
-}
+        history_close();
+        alias_free();
+        plugins_unload();
+        return 0;
+    }
+

@@ -81,5 +81,6 @@ int run_builtin(Command *cmd);
 char *expand_word(const char *word, int last_exit_status);
 void  expand_tokens(Token *toks, int ntokens, int last_exit_status);
 Token *glob_expand_tokens(Token *toks, int *ntokens, int last_exit_status);
+Token *brace_expand_tokens(Token *toks, int *ntokens);
 
 #endif //MYSHELL_SHELL_H
