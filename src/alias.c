@@ -91,13 +91,13 @@ void alias_free(void) {
     alias_count = 0;
 }
 
-void alias_each(void (*cb)(const char *name, void *ud), void *ud) {
+void alias_each(void (*cb)(const char *name, const char *value, void *ud), void *ud) {
     if (!cb) return;
     
     // Iterate through all active entries
     for (int i = 0; i < alias_count; i++) {
-        if (table[i].active && table[i].name) {
-            cb(table[i].name, ud);
+        if (table[i].active && table[i].name && table[i].value) {
+            cb(table[i].name, table[i].value, ud);
         }
     }
 }

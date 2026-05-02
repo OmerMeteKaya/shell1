@@ -13,6 +13,8 @@
 #include <ctype.h>
 #include "../include/input.h"
 #include "../include/highlight.h"
+#include "../include/alias.h"
+#include "../include/completions.h"
 
 /* External declarations */
 extern int is_builtin(const char *cmd);
@@ -116,6 +118,28 @@ static void clear_below(int n) {
     }
 }
 
+typedef struct {
+    char **items;
+    int  *count;
+    const char *word;
+    int   wlen;
+    int   cap;
+} AliasCbCtx;
+
+static void alias_collect_cb(const char *name, const char *value,
+                              void *ud) {
+    (void)value;
+    AliasCbCtx *ctx = (AliasCbCtx *)ud;
+    if (*ctx->count >= ctx->cap) return;
+    if (strncmp(name, ctx->word, ctx->wlen) == 0) {
+        /* dedup check */
+        for (int j = 0; j < *ctx->count; j++) {
+            if (strcmp(ctx->items[j], name) == 0) return;
+        }
+        ctx->items[(*ctx->count)++] = strdup(name);
+    }
+}
+
 
 
 static void panel_show_history(int hist_off, int *panel_rows) {
@@ -213,16 +237,8 @@ static void panel_rebuild(const char *buf, int len, int pos,
         }
 
         /* 2. aliases */
-        const char *alias_names[] = {
-            "ll","la","gs","..","grep","ls","git", NULL
-            /* not ideal — use alias_each if available */
-        };
-        for (int i = 0; alias_names[i]; i++) {
-            if (strncmp(alias_names[i], word, wlen) == 0) {
-                if (alias_expand(alias_names[i]) && count < 60)
-                    items[count++] = strdup(alias_names[i]);
-            }
-        }
+        AliasCbCtx actx = { items, &count, word, wlen, 60 };
+        alias_each(alias_collect_cb, &actx);
 
         /* 3. PATH executables */
         char *path_env = getenv("PATH");
@@ -262,6 +278,21 @@ static void panel_rebuild(const char *buf, int len, int pos,
         char word[MAXIMUM_INPUT] = {0};
         strncpy(word, buf + ws, wlen);
 
+        /* 1. try subcommand completion first */
+        int sub_count = 0;
+        char **subcmds = get_subcommands(cmd, word, &sub_count);
+        if (subcmds) {
+            /* use subcommands as panel items */
+            for (int i = 0; i < sub_count && count < 60; i++) {
+                items[count++] = subcmds[i];  /* already malloc'd */
+            }
+            free(subcmds);  /* free array but not strings — moved to items */
+            *items_out = items;
+            *count_out = count;
+            return;
+        }
+
+        /* 2. fall through to glob-based completion */
         /* build glob pattern */
         char pattern[MAXIMUM_INPUT];
         int cd_mode = (strcmp(cmd, "cd") == 0);
@@ -635,35 +666,58 @@ char *read_line(const char *prompt) {
         
         /* TAB */
         if (c == '\t') {
-            if (panel_count == 1 && panel_sel == -1) {
-                /* accept single item */
-                if (panel_items && panel_count > 0) {
-                    int ws = pos;
-                    while (ws > 0 && buf[ws-1] != ' ') ws--;
-                    const char *match = panel_items[0];
-                    int match_len = strlen(match);
-                    int tail = len - pos;
-                    memmove(buf + ws + match_len, buf + pos, tail);
-                    memcpy(buf + ws, match, match_len);
-                    len = ws + match_len + tail;
-                    pos = ws + match_len;
-                    buf[len] = '\0';
+            /* 1. ghost suggestion varsa kabul et — HER ZAMAN önce */
+            char *sug = find_suggestion(buf, len);
+            if (sug) {
+                int sug_len = strlen(sug);
+                if (sug_len > len && sug_len < MAXIMUM_INPUT) {
+                    strncpy(buf, sug, MAXIMUM_INPUT - 1);
+                    len = sug_len; pos = len;
+                    free(sug);
                     panel_free(panel_items, panel_count);
                     panel_rebuild(buf, len, pos, &panel_items, &panel_count);
                     panel_sel = -1;
                     panel_render(panel_items, panel_count, panel_sel, &panel_rows);
                     render_with_suggestion(prompt, buf, len, pos);
-
+                    continue;
                 }
+                free(sug);
+            }
+
+            /* 2. panel yoksa — zil */
+            if (panel_count == 0) {
+                write(STDOUT_FILENO, "\a", 1);
                 continue;
-            } else if (panel_sel == -1 && panel_count > 0) {
+            }
+
+            /* 3. tek eşleşme — direkt tamamla */
+            if (panel_count == 1 && panel_sel == -1) {
+                int ws = pos;
+                while (ws > 0 && buf[ws-1] != ' ') ws--;
+                const char *match = panel_items[0];
+                int match_len = strlen(match);
+                int tail = len - pos;
+                memmove(buf + ws + match_len, buf + pos, tail);
+                memcpy(buf + ws, match, match_len);
+                len = ws + match_len + tail;
+                pos = ws + match_len;
+                buf[len] = '\0';
+                panel_free(panel_items, panel_count);
+                panel_rebuild(buf, len, pos, &panel_items, &panel_count);
+                panel_sel = -1;
+                panel_render(panel_items, panel_count, panel_sel, &panel_rows);
+                render_with_suggestion(prompt, buf, len, pos);
+                continue;
+            }
+
+            /* 4. çok eşleşme — panele gir veya ilerle */
+            if (panel_sel == -1) {
                 panel_sel = 0;
-            } else if (panel_sel >= 0) {
+            } else {
                 panel_sel = (panel_sel + 1) % panel_count;
             }
             panel_render(panel_items, panel_count, panel_sel, &panel_rows);
             render_with_suggestion(prompt, buf, len, pos);
-
             continue;
         }
         

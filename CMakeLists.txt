@@ -27,4 +27,5 @@ add_executable(shell
         plugins/git.c
         src/plugin.c
         src/highlight.c
-        include/highlight.h)
+        include/highlight.h
+        include/completions.h)
