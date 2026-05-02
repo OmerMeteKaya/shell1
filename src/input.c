@@ -396,24 +396,94 @@ static void ctr_clear_list(int *list_rows) {
     *list_rows = 0;
 }
 
+static void write_highlighted(const char *str, const char *query, int qlen) {
+    /* writes str to stdout, highlighting occurrences of query in bold yellow */
+    if (!query || qlen == 0) {
+        write(STDOUT_FILENO, str, strlen(str));
+        return;
+    }
+
+    const char *p = str;
+    while (*p) {
+        /* case-insensitive search for query at position p */
+        int match = 1;
+        for (int i = 0; i < qlen; i++) {
+            if (!p[i]) { match = 0; break; }
+            if (tolower((unsigned char)p[i]) !=
+                tolower((unsigned char)query[i])) {
+                match = 0; break;
+            }
+        }
+        if (match) {
+            /* write matched part in bold yellow */
+            write(STDOUT_FILENO, "\033[1;33m", 7);
+            write(STDOUT_FILENO, p, qlen);
+            write(STDOUT_FILENO, "\033[0m", 4);
+            /* restore dim/bold state for selected/non-selected */
+            p += qlen;
+        } else {
+            write(STDOUT_FILENO, p, 1);
+            p++;
+        }
+    }
+}
+static int display_len_skip_ansi(const char *s) {
+    int cols = 0;
+    while (*s) {
+        if (*s == '\033') {
+            /* ANSI escape — ] veya letter'a kadar atla */
+            s++;
+            if (*s == '[') {
+                s++;
+                while (*s && !isalpha((unsigned char)*s)) s++;
+                if (*s) s++;
+            }
+            continue;
+        }
+        unsigned char c = (unsigned char)*s;
+        if (c < 0x80) { cols++; s++; }
+        else if (c < 0xC0) { s++; }
+        else if (c < 0xE0) { cols++; s += 2; }
+        else if (c < 0xF0) { cols++; s += 3; }
+        else { cols++; s += 4; }
+    }
+    return cols;
+}
+
 static void ctr_render_prompt(const char *query, int qlen,
                                char **results, int rcount, int sel) {
+    /* Satırı tamamen temizle ve başa dön */
     write(STDOUT_FILENO, "\r\033[K", 4);
-    const char *sp = "\033[1;36m(reverse-i-search)`\033[0m";
-    write(STDOUT_FILENO, sp, strlen(sp));
-    write(STDOUT_FILENO, query, qlen);
-    const char *sep = "\033[1;36m':\033[0m ";
-    write(STDOUT_FILENO, sep, strlen(sep));
+
+    /* Prefix yaz — görüntü: "(search) " */
+    const char *prefix = "(search) ";
+    write(STDOUT_FILENO, "\033[2;37m", 7);
+    write(STDOUT_FILENO, prefix, strlen(prefix));
+    write(STDOUT_FILENO, "\033[0m", 4);
+
+    /* Sonucu yaz */
     if (results && rcount > 0 && sel < rcount) {
-        write(STDOUT_FILENO, "\033[1m", 4);
-        write(STDOUT_FILENO, results[sel], strlen(results[sel]));
-        write(STDOUT_FILENO, "\033[0m", 4);
+        write_highlighted(results[sel], query, qlen);
     }
+
+    /* Ayırıcı */
+    write(STDOUT_FILENO, "  \033[2;37m>\033[0m  ", 16);
+
+    /* Query yaz — cursor burada kalacak */
+    write(STDOUT_FILENO, "\033[1;36m", 7);
+    write(STDOUT_FILENO, query, qlen);
+    write(STDOUT_FILENO, "\033[0m", 4);
+
+    /* Satır sonunu temizle */
     write(STDOUT_FILENO, "\033[K", 3);
+
+    /* Cursor şu an query'nin sonunda
+       Geri almamıza gerek yok — query en sonda */
 }
 
 static void ctr_render_list(char **results, int *ids, int rcount,
-                             int sel, int *list_rows) {
+                             int sel, int *list_rows,
+                             const char *query, int qlen) {
     ctr_clear_list(list_rows);
     if (!results || rcount == 0) return;
     int show = rcount < 8 ? rcount : 8;
@@ -429,7 +499,7 @@ static void ctr_render_list(char **results, int *ids, int rcount,
                      "  \033[2;37m%2d\033[0m  ", ids[i]);
         }
         write(STDOUT_FILENO, idx, strlen(idx));
-        write(STDOUT_FILENO, results[i], strlen(results[i]));
+        write_highlighted(results[i], query, qlen);
         if (i == sel) write(STDOUT_FILENO, "\033[0m", 4);
     }
     /* move back up */
@@ -457,7 +527,8 @@ static char *search_history_interactive(const char *prompt_str) {
     } while(0)
 
     ctr_render_prompt(query, qlen, results, rcount, sel);
-    ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+    ctr_render_list(results, result_ids, rcount, sel, &list_rows, query, qlen);
+    ctr_render_prompt(query, qlen, results, rcount, sel);
 
     while (1) {
         char c;
@@ -491,14 +562,23 @@ static char *search_history_interactive(const char *prompt_str) {
 
         /* ESC sequence */
         if (c == 27) {
-            char seq[2];
-            if (read(STDIN_FILENO, &seq[0], 1) <= 0) continue;
-            if (read(STDIN_FILENO, &seq[1], 1) <= 0) continue;
-            if (seq[0] == '[') {
-                if (seq[1] == 'A' && sel > 0) sel--;          /* up */
-                if (seq[1] == 'B' && sel < rcount-1) sel++;   /* down */
-            } else {
-                /* plain ESC — cancel */
+            /* non-blocking ile sonraki byte'ı kontrol et */
+            struct termios nb;
+            tcgetattr(STDIN_FILENO, &nb);
+            nb.c_cc[VMIN] = 0;
+            nb.c_cc[VTIME] = 1;  /* 100ms bekle */
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &nb);
+
+            char seq[2] = {0, 0};
+            int n1 = read(STDIN_FILENO, &seq[0], 1);
+
+            /* raw mode'u geri al */
+            nb.c_cc[VMIN] = 1;
+            nb.c_cc[VTIME] = 0;
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &nb);
+
+            if (n1 <= 0 || seq[0] != '[') {
+                /* plain ESC — çık */
                 ctr_clear_list(&list_rows);
                 write(STDOUT_FILENO, "\r", 1);
                 write(STDOUT_FILENO, "\033[K", 3);
@@ -506,8 +586,15 @@ static char *search_history_interactive(const char *prompt_str) {
                 FREE_RESULTS();
                 return NULL;
             }
+
+            /* ESC [ sequence — ok tuşu */
+            read(STDIN_FILENO, &seq[1], 1);
+            if (seq[1] == 'A' && sel > 0) sel--;
+            if (seq[1] == 'B' && sel < rcount-1) sel++;
             ctr_render_prompt(query, qlen, results, rcount, sel);
-            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+            ctr_render_list(results, result_ids, rcount, sel,
+                            &list_rows, query, qlen);
+            ctr_render_prompt(query, qlen, results, rcount, sel);
             continue;
         }
 
@@ -515,7 +602,8 @@ static char *search_history_interactive(const char *prompt_str) {
         if (c == 18) {
             if (rcount > 0) sel = (sel + 1) % rcount;
             ctr_render_prompt(query, qlen, results, rcount, sel);
-            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows, query, qlen);
+            ctr_render_prompt(query, qlen, results, rcount, sel);
             continue;
         }
 
@@ -530,7 +618,8 @@ static char *search_history_interactive(const char *prompt_str) {
                     results = history_search_multi(query, 8, &rcount, &result_ids);
             }
             ctr_render_prompt(query, qlen, results, rcount, sel);
-            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows,query,qlen);
+            ctr_render_prompt(query, qlen, results, rcount, sel);
             continue;
         }
 
@@ -544,7 +633,8 @@ static char *search_history_interactive(const char *prompt_str) {
                 results = history_search_multi(query, 8, &rcount, &result_ids);
             }
             ctr_render_prompt(query, qlen, results, rcount, sel);
-            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows,query,qlen);
+            ctr_render_prompt(query, qlen, results, rcount, sel);
             continue;
         }
     }
