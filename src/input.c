@@ -138,20 +138,26 @@ static void panel_show_history(int hist_off, int *panel_rows) {
     }
     if (count == 0) return;
 
+    int total = history_total_count();
     int rows = 0;
     for (int i = 0; i < count; i++) {
         write(STDOUT_FILENO, "\n\033[K", 4);
         rows++;
         int is_selected = (i + 1 == hist_off);
+        int abs_index = total - i;
+        char index_str[16];
         if (is_selected) {
-            const char *arrow = "\033[1;32m▶ \033[0m\033[1m";
+            const char *arrow = "\033[1;32m▶ \033[0m";
             write(STDOUT_FILENO, arrow, strlen(arrow));
+            snprintf(index_str, sizeof(index_str), "\033[1;32m%2d\033[0m  ", abs_index);
         } else {
             write(STDOUT_FILENO, "  ", 2);
+            snprintf(index_str, sizeof(index_str), "\033[2;37m%2d\033[0m  ", abs_index);
         }
+        write(STDOUT_FILENO, index_str, strlen(index_str));
+        if (is_selected) write(STDOUT_FILENO, "\033[1m", 4);
         write(STDOUT_FILENO, entries[i], strlen(entries[i]));
-        if (is_selected)
-            write(STDOUT_FILENO, "\033[0m", 4);
+        if (is_selected) write(STDOUT_FILENO, "\033[0m", 4);
         free(entries[i]);
     }
 
@@ -347,59 +353,139 @@ static void panel_render(char **items, int count, int sel,
     *panel_rows_out = rows;
 }
 
-static void render_search(const char *query, int qlen, const char *match) {
-    write(STDOUT_FILENO, "\r", 1);
-    write(STDOUT_FILENO, "\033[K", 3);
-    const char *sp = "(reverse-i-search)`";
-    write(STDOUT_FILENO, sp, strlen(sp));
-    write(STDOUT_FILENO, query, qlen);
-    const char *sep = "': ";
-    write(STDOUT_FILENO, sep, strlen(sep));
-    if (match && *match)
-        write(STDOUT_FILENO, match, strlen(match));
+static void ctr_clear_list(int *list_rows) {
+    if (*list_rows == 0) return;
+    /* save cursor */
+    write(STDOUT_FILENO, "\033[s", 3);
+    for (int i = 0; i < *list_rows; i++) {
+        write(STDOUT_FILENO, "\n\033[K", 4);
+    }
+    /* restore cursor */
+    write(STDOUT_FILENO, "\033[u", 3);
+    *list_rows = 0;
 }
 
-static char *search_history_interactive(const char *prompt) {
-    /*
-     * Enters reverse-i-search mode.
-     * Returns malloc'd command string if accepted, NULL if cancelled.
-     */
+static void ctr_render_prompt(const char *query, int qlen,
+                               char **results, int rcount, int sel) {
+    write(STDOUT_FILENO, "\r\033[K", 4);
+    const char *sp = "\033[1;36m(reverse-i-search)`\033[0m";
+    write(STDOUT_FILENO, sp, strlen(sp));
+    write(STDOUT_FILENO, query, qlen);
+    const char *sep = "\033[1;36m':\033[0m ";
+    write(STDOUT_FILENO, sep, strlen(sep));
+    if (results && rcount > 0 && sel < rcount) {
+        write(STDOUT_FILENO, "\033[1m", 4);
+        write(STDOUT_FILENO, results[sel], strlen(results[sel]));
+        write(STDOUT_FILENO, "\033[0m", 4);
+    }
+    write(STDOUT_FILENO, "\033[K", 3);
+}
+
+static void ctr_render_list(char **results, int *ids, int rcount,
+                             int sel, int *list_rows) {
+    ctr_clear_list(list_rows);
+    if (!results || rcount == 0) return;
+    int show = rcount < 8 ? rcount : 8;
+    for (int i = 0; i < show; i++) {
+        write(STDOUT_FILENO, "\n\033[K", 4);
+        (*list_rows)++;
+        char idx[32];
+        if (i == sel) {
+            snprintf(idx, sizeof(idx),
+                     "\033[1;32m▶ %2d\033[0m  \033[1m", ids[i]);
+        } else {
+            snprintf(idx, sizeof(idx),
+                     "  \033[2;37m%2d\033[0m  ", ids[i]);
+        }
+        write(STDOUT_FILENO, idx, strlen(idx));
+        write(STDOUT_FILENO, results[i], strlen(results[i]));
+        if (i == sel) write(STDOUT_FILENO, "\033[0m", 4);
+    }
+    /* move back up */
+    char esc[16];
+    snprintf(esc, sizeof(esc), "\033[%dA", *list_rows);
+    write(STDOUT_FILENO, esc, strlen(esc));
+}
+
+static char *search_history_interactive(const char *prompt_str) {
     char query[MAXIMUM_INPUT] = {0};
     int  qlen = 0;
-    int  skip = 0;       /* how many matches to skip (for repeated Ctrl+R) */
-    char match[MAXIMUM_INPUT] = {0};
+    int  sel = 0;          /* selected index in results list */
+    char **results = NULL;
+    int  *result_ids = NULL;
+    int  rcount = 0;
+    int  list_rows = 0;    /* how many rows the list occupies */
 
-    render_search(query, qlen, match);
+    /* free results helper */
+    #define FREE_RESULTS() do { \
+        if (results) { \
+            for (int _i = 0; _i < rcount; _i++) free(results[_i]); \
+            free(results); results = NULL; rcount = 0; \
+        } \
+        if (result_ids) { free(result_ids); result_ids = NULL; } \
+    } while(0)
+
+    ctr_render_prompt(query, qlen, results, rcount, sel);
+    ctr_render_list(results, result_ids, rcount, sel, &list_rows);
 
     while (1) {
         char c;
-        if (read(STDIN_FILENO, &c, 1) <= 0) return NULL;
-
-        /* Ctrl+R — next match */
-        if (c == 18) {
-            skip++;
-            char *h = history_search(query, skip);
-            if (h) {
-                strncpy(match, h, MAXIMUM_INPUT - 1);
-                free(h);
-            } else {
-                skip--;  /* no more matches, stay */
-            }
-            render_search(query, qlen, match);
-            continue;
+        if (read(STDIN_FILENO, &c, 1) <= 0) {
+            FREE_RESULTS();
+            return NULL;
         }
 
-        /* Enter — accept match */
+        /* Enter — accept */
         if (c == '\r' || c == '\n') {
+            char *ret = NULL;
+            if (results && rcount > 0 && sel < rcount)
+                ret = strdup(results[sel]);
+            ctr_clear_list(&list_rows);
+            write(STDOUT_FILENO, "\r", 1);
+            write(STDOUT_FILENO, "\033[K", 3);   /* clear search prompt line */
             write(STDOUT_FILENO, "\r\n", 2);
-            if (match[0]) return strdup(match);
-            return NULL;
+            FREE_RESULTS();
+            return ret;
         }
 
         /* ESC or Ctrl+C — cancel */
-        if (c == 27 || c == 3) {
+        if (c == 3) {
+            ctr_clear_list(&list_rows);
+            write(STDOUT_FILENO, "\r", 1);
+            write(STDOUT_FILENO, "\033[K", 3);
             write(STDOUT_FILENO, "\r\n", 2);
+            FREE_RESULTS();
             return NULL;
+        }
+
+        /* ESC sequence */
+        if (c == 27) {
+            char seq[2];
+            if (read(STDIN_FILENO, &seq[0], 1) <= 0) continue;
+            if (read(STDIN_FILENO, &seq[1], 1) <= 0) continue;
+            if (seq[0] == '[') {
+                if (seq[1] == 'A' && sel > 0) sel--;          /* up */
+                if (seq[1] == 'B' && sel < rcount-1) sel++;   /* down */
+            } else {
+                /* plain ESC — cancel */
+                ctr_clear_list(&list_rows);
+                write(STDOUT_FILENO, "\r", 1);
+                write(STDOUT_FILENO, "\033[K", 3);
+                write(STDOUT_FILENO, "\r\n", 2);
+                FREE_RESULTS();
+                return NULL;
+            }
+            ctr_render_prompt(query, qlen, results, rcount, sel);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+            continue;
+        }
+
+        /* Ctrl+R — next match (cycle selection down) */
+        if (c == 18) {
+            if (rcount > 0) sel = (sel + 1) % rcount;
+            ctr_render_prompt(query, qlen, results, rcount, sel);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
+            continue;
         }
 
         /* Backspace */
@@ -407,34 +493,27 @@ static char *search_history_interactive(const char *prompt) {
             if (qlen > 0) {
                 qlen--;
                 query[qlen] = '\0';
-                skip = 0;
-                char *h = history_search(query, 0);
-                if (h) {
-                    strncpy(match, h, MAXIMUM_INPUT - 1);
-                    free(h);
-                } else {
-                    match[0] = '\0';
-                }
+                sel = 0;
+                FREE_RESULTS();
+                if (qlen > 0)
+                    results = history_search_multi(query, 8, &rcount, &result_ids);
             }
-            render_search(query, qlen, match);
+            ctr_render_prompt(query, qlen, results, rcount, sel);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
             continue;
         }
 
-        /* Printable char — add to query */
+        /* Printable char */
         if (c >= 32 && c < 127) {
             if (qlen < MAXIMUM_INPUT - 1) {
                 query[qlen++] = c;
                 query[qlen] = '\0';
-                skip = 0;
-                char *h = history_search(query, 0);
-                if (h) {
-                    strncpy(match, h, MAXIMUM_INPUT - 1);
-                    free(h);
-                } else {
-                    match[0] = '\0';
-                }
+                sel = 0;
+                FREE_RESULTS();
+                results = history_search_multi(query, 8, &rcount, &result_ids);
             }
-            render_search(query, qlen, match);
+            ctr_render_prompt(query, qlen, results, rcount, sel);
+            ctr_render_list(results, result_ids, rcount, sel, &list_rows);
             continue;
         }
     }
@@ -758,16 +837,22 @@ char *read_line(const char *prompt) {
         
         /* Ctrl+R — reverse history search */
         if (c == 18) {
+            int search_rows = 0;
             char *result = search_history_interactive(prompt);
+            for (int i = 0; i < 10; i++) {
+                write(STDOUT_FILENO, "\033[B\033[K", 6);
+            }
+            /* geri çık */
+            write(STDOUT_FILENO, "\033[10A", 5);
+            write(STDOUT_FILENO, "\r\033[K", 4);
+
             if (result) {
-                /* put result into buf */
                 strncpy(buf, result, MAXIMUM_INPUT - 1);
                 buf[MAXIMUM_INPUT - 1] = '\0';
                 len = strlen(buf);
                 pos = len;
                 free(result);
             } else {
-                /* cancelled — clear buf */
                 memset(buf, 0, MAXIMUM_INPUT);
                 len = 0;
                 pos = 0;

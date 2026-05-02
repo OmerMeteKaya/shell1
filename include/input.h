@@ -18,7 +18,9 @@ void  history_add(const char *line);
 char *history_get(int offset);
 char *history_search_prefix(const char *prefix);  /* yeni fonksiyon */
 char *history_search(const char *query, int skip);
+char **history_search_multi(const char *query, int max_results, int *count_out, int **ids_out);
 int   history_count(void);
+int   history_total_count(void);
 void  history_close(void);
 
 #endif

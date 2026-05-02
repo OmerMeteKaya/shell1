@@ -26,19 +26,30 @@ void history_init(const char *db_path) {
 
 void history_add(const char *line) {
     if (!line || !db) return;
-    
-    // Boş veya sadece boşluk karakterlerinden oluşan satırları ekleme
+
+    /* boş satır kontrolü */
     const char *p = line;
     while (*p && isspace((unsigned char)*p)) p++;
     if (*p == '\0') return;
-    
+
+    /* son kayıtla aynıysa ekleme */
+    const char *check_sql = "SELECT cmd FROM history ORDER BY id DESC LIMIT 1;";
+    sqlite3_stmt *check;
+    if (sqlite3_prepare_v2(db, check_sql, -1, &check, NULL) == SQLITE_OK) {
+        if (sqlite3_step(check) == SQLITE_ROW) {
+            const char *last = (const char *)sqlite3_column_text(check, 0);
+            if (last && strcmp(last, line) == 0) {
+                sqlite3_finalize(check);
+                return;  /* aynı komut, kaydetme */
+            }
+        }
+        sqlite3_finalize(check);
+    }
+
+    /* INSERT */
     const char *sql = "INSERT INTO history (cmd) VALUES (?);";
     sqlite3_stmt *stmt;
-    
-    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        return;
-    }
-    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) return;
     sqlite3_bind_text(stmt, 1, line, -1, SQLITE_STATIC);
     sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -112,6 +123,72 @@ char *history_search(const char *query, int skip) {
     
     sqlite3_finalize(stmt);
     return NULL;
+}
+
+char **history_search_multi(const char *query, int max_results, int *count_out, int **ids_out) {
+    if (!db || !query || !*query) { *count_out = 0; *ids_out = NULL; return NULL; }
+
+    const char *sql =
+    "SELECT cmd, last_id FROM ("
+    "  SELECT cmd, MAX(id) as last_id FROM history "
+    "  WHERE cmd LIKE '%' || ? || '%' "
+    "  GROUP BY cmd"
+    ") ORDER BY last_id DESC LIMIT ?;";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        *count_out = 0; *ids_out = NULL; return NULL;
+    }
+    sqlite3_bind_text(stmt, 1, query, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, max_results);
+
+    char **results = malloc(max_results * sizeof(char *));
+    int *ids = malloc(max_results * sizeof(int));
+    if (!results || !ids) { 
+        sqlite3_finalize(stmt); 
+        if (results) free(results);
+        if (ids) free(ids);
+        *count_out = 0; 
+        *ids_out = NULL;
+        return NULL; 
+    }
+
+    int count = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && count < max_results) {
+        const char *cmd = (const char *)sqlite3_column_text(stmt, 0);
+        results[count] = strdup(cmd);
+        ids[count] = sqlite3_column_int(stmt, 1);
+        count++;
+    }
+    sqlite3_finalize(stmt);
+    *count_out = count;
+    *ids_out = ids;
+    if (count == 0) { 
+        free(results); 
+        free(ids);
+        *ids_out = NULL;
+        return NULL; 
+    }
+    return results;
+}
+
+int history_total_count(void) {
+    if (!db) return 0;
+    
+    const char *sql = "SELECT COUNT(*) FROM history;";
+    sqlite3_stmt *stmt;
+    
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return 0;
+    }
+    
+    if (sqlite3_step(stmt) == SQLITE_ROW) {
+        int count = sqlite3_column_int(stmt, 0);
+        sqlite3_finalize(stmt);
+        return count;
+    }
+    
+    sqlite3_finalize(stmt);
+    return 0;
 }
 
 int history_count(void) {
