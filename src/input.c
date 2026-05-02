@@ -15,6 +15,7 @@
 #include "../include/highlight.h"
 #include "../include/alias.h"
 #include "../include/completions.h"
+#include "../include/config.h"
 
 /* External declarations */
 extern int is_builtin(const char *cmd);
@@ -201,6 +202,8 @@ static void panel_free(char **items, int count) {
 /* Panel rebuild (call after every buf change) */
 static void panel_rebuild(const char *buf, int len, int pos,
                           char ***items_out, int *count_out) {
+    if (!g_config.panel_enabled) { *items_out=NULL; *count_out=0; return; }
+    
     /* free old items first — caller handles this */
     *items_out = NULL;
     *count_out = 0;
@@ -277,6 +280,21 @@ static void panel_rebuild(const char *buf, int len, int pos,
         int wlen = pos - ws;
         char word[MAXIMUM_INPUT] = {0};
         strncpy(word, buf + ws, wlen);
+
+        /* 0. try dynamic completion first (context-aware) */
+        char cmdline[MAXIMUM_INPUT] = {0};
+        strncpy(cmdline, buf, len);
+        cmdline[len] = '\0';
+        int dyn_count = 0;
+        char **dyn = get_dynamic_completions(cmdline, pos, &dyn_count);
+        if (dyn) {
+            for (int i = 0; i < dyn_count && count < 60; i++)
+                items[count++] = dyn[i];
+            free(dyn);  /* free array, not strings */
+            *items_out = items;
+            *count_out = count;
+            return;
+        }
 
         /* 1. try subcommand completion first */
         int sub_count = 0;
@@ -670,6 +688,8 @@ static char *find_suggestion(const char *buf, int len) {
 
 static void render_with_suggestion(const char *prompt, const char *buf,
                                     int len, int pos) {
+    if (!g_config.suggestion_enabled) return;
+    
     render(prompt, buf, len, pos);
 
     if (pos != len) return;  /* sadece cursor sondayken */

@@ -257,6 +257,85 @@ static const char *git_cmds[] = {
     "status", "switch", "tag", "--version", "--help", NULL
 };
 
+/* Helper: run_and_collect */
+static char **run_and_collect(const char *shell_cmd, int *count_out) {
+    /* runs shell_cmd via popen, returns malloc'd array of lines */
+    FILE *fp = popen(shell_cmd, "r");
+    if (!fp) { *count_out = 0; return NULL; }
+
+    char **results = malloc(64 * sizeof(char *));
+    if (!results) { pclose(fp); *count_out = 0; return NULL; }
+    int count = 0, cap = 64;
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp) && count < 60) {
+        /* strip newline */
+        int l = strlen(line);
+        while (l > 0 && (line[l-1]=='\n'||line[l-1]=='\r')) line[--l]='\0';
+        if (l == 0) continue;
+        if (count >= cap) {
+            cap *= 2;
+            char **tmp = realloc(results, cap * sizeof(char*));
+            if (!tmp) break;
+            results = tmp;
+        }
+        results[count++] = strdup(line);
+    }
+    pclose(fp);
+    *count_out = count;
+    if (count == 0) { free(results); return NULL; }
+    return results;
+}
+
+/* Helper: get_git_branches */
+static char **get_git_branches(const char *prefix, int *count_out) {
+    /* git branch --format='%(refname:short)' 2>/dev/NULL */
+    char cmd[512];
+    if (prefix && *prefix)
+        snprintf(cmd, sizeof(cmd),
+            "git branch --format='%%(refname:short)' 2>/dev/NULL"
+            " | grep '^%s'", prefix);
+    else
+        snprintf(cmd, sizeof(cmd),
+            "git branch --format='%%(refname:short)' 2>/dev/NULL");
+    return run_and_collect(cmd, count_out);
+}
+
+/* Helper: get_git_remotes */
+static char **get_git_remotes(const char *prefix, int *count_out) {
+    char cmd[512];
+    if (prefix && *prefix)
+        snprintf(cmd, sizeof(cmd),
+            "git remote 2>/dev/NULL | grep '^%s'", prefix);
+    else
+        snprintf(cmd, sizeof(cmd), "git remote 2>/dev/NULL");
+    return run_and_collect(cmd, count_out);
+}
+
+/* Helper: get_git_changed_files */
+static char **get_git_changed_files(const char *prefix, int *count_out) {
+    /* git status --short → lines like " M file.c" or "?? file.c" */
+    char cmd[512];
+    if (prefix && *prefix)
+        snprintf(cmd, sizeof(cmd),
+            "git status --short 2>/dev/NULL"
+            " | awk '{print $NF}' | grep '^%s'", prefix);
+    else
+        snprintf(cmd, sizeof(cmd),
+            "git status --short 2>/dev/NULL | awk '{print $NF}'");
+    return run_and_collect(cmd, count_out);
+}
+
+/* Helper: get_git_stashes */
+static char **get_git_stashes(const char *prefix, int *count_out) {
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd),
+        "git stash list 2>/dev/NULL"
+        " | awk -F: '{print $1}'");
+    (void)prefix;
+    return run_and_collect(cmd, count_out);
+}
+
 static const char *pacman_cmds[] = {
     "-S", "-Ss", "-Si", "-Sw", "-Su", "-Syu", "-Syyu",
     "-R", "-Rs", "-Rns",
@@ -548,4 +627,115 @@ char **get_subcommands(const char *cmd, const char *word, int *count_out) {
 
     *count_out = count;
     return results;
+}
+
+char **get_dynamic_completions(const char *cmdline, int cursor_pos,
+                                int *count_out) {
+    *count_out = 0;
+    if (!cmdline) return NULL;
+
+    /* parse cmdline into words */
+    char line[4096];
+    strncpy(line, cmdline, sizeof(line)-1);
+
+    char *words[32] = {0};
+    int nwords = 0;
+    char *p = line;
+    while (*p && nwords < 32) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        words[nwords++] = p;
+        while (*p && *p != ' ') p++;
+        if (*p) *p++ = '\0';
+    }
+    if (nwords == 0) return NULL;
+
+    /* current (incomplete) word — last word if cmdline ends without space */
+    int ends_with_space = (cmdline[strlen(cmdline)-1] == ' ');
+    const char *current_word = ends_with_space ? "" :
+                               (nwords > 0 ? words[nwords-1] : "");
+    int effective_words = ends_with_space ? nwords : nwords - 1;
+
+    /* only handle git for now */
+    if (effective_words == 0) return NULL;
+    if (strcmp(words[0], "git") != 0) return NULL;
+
+    if (effective_words == 1) {
+        /* "git <TAB>" — return static git subcommands filtered by current_word */
+        return get_subcommands("git", current_word, count_out);
+    }
+
+    const char *subcmd = words[1];
+    const char *prefix = current_word;
+
+    /* git add → changed files */
+    if (strcmp(subcmd, "add") == 0) {
+        return get_git_changed_files(prefix, count_out);
+    }
+
+    /* git checkout / switch / merge / branch -d → branches */
+    if (strcmp(subcmd, "checkout") == 0 ||
+        strcmp(subcmd, "switch") == 0 ||
+        strcmp(subcmd, "merge") == 0 ||
+        strcmp(subcmd, "rebase") == 0) {
+        return get_git_branches(prefix, count_out);
+    }
+
+    /* git branch — if -d or -D flag present, complete branches */
+    if (strcmp(subcmd, "branch") == 0 && effective_words >= 2) {
+        for (int i = 2; i < effective_words; i++) {
+            if (strcmp(words[i], "-d") == 0 ||
+                strcmp(words[i], "-D") == 0 ||
+                strcmp(words[i], "-m") == 0) {
+                return get_git_branches(prefix, count_out);
+            }
+        }
+    }
+
+    /* git push / pull → remotes */
+    if (strcmp(subcmd, "push") == 0 ||
+        strcmp(subcmd, "pull") == 0 ||
+        strcmp(subcmd, "fetch") == 0) {
+        if (effective_words == 2) {
+            return get_git_remotes(prefix, count_out);
+        }
+        if (effective_words == 3) {
+            /* git push origin <TAB> → branches */
+            return get_git_branches(prefix, count_out);
+        }
+    }
+
+    /* git stash pop/drop/show → stash list */
+    if (strcmp(subcmd, "stash") == 0 && effective_words >= 2) {
+        const char *stash_sub = effective_words > 2 ? words[2] : "";
+        if (strcmp(stash_sub, "pop") == 0 ||
+            strcmp(stash_sub, "drop") == 0 ||
+            strcmp(stash_sub, "show") == 0 ||
+            strcmp(stash_sub, "apply") == 0) {
+            return get_git_stashes(prefix, count_out);
+        }
+        /* git stash <TAB> → stash subcommands */
+        static const char *stash_cmds[] = {
+            "push","pop","list","show","drop","clear",
+            "apply","branch","create","store", NULL
+        };
+        int wlen = strlen(stash_sub);
+        int total = 0;
+        for (int i = 0; stash_cmds[i]; i++)
+            if (!wlen || strncmp(stash_cmds[i], stash_sub, wlen)==0) total++;
+        if (total > 0) {
+            char **r = malloc(total * sizeof(char*));
+            int c = 0;
+            for (int i = 0; stash_cmds[i] && c<total; i++)
+                if (!wlen || strncmp(stash_cmds[i], stash_sub, wlen)==0)
+                    r[c++] = strdup(stash_cmds[i]);
+            *count_out = c;
+            return r;
+        }
+    }
+
+    /* git commit -m → no completion */
+    /* git log / diff / show → no special completion for now */
+
+    return NULL;
 }

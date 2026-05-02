@@ -4,11 +4,10 @@
 
 #include <time.h>
 extern int last_exit_status;
-
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
 #include <unistd.h>
 
 #include "../include/shell.h"
@@ -16,6 +15,7 @@ extern int last_exit_status;
 #include "../include/alias.h"
 #include "../include/rc.h"
 #include "../include/plugin.h"
+#include "../include/config.h"
 
 void signals_init(void);
 void jobs_init(void);
@@ -36,9 +36,23 @@ int main() {
         snprintf(history_path, sizeof(history_path), ".mysh_history");
     }
     history_init(history_path);
+    // Home
+    char mysh_dir[512];
+    if (home)
+        snprintf(mysh_dir, sizeof(mysh_dir), "%s/.mysh", home);
+    mkdir(mysh_dir, 0755);
 
     // Alias
     alias_init();
+
+    // Config
+    char config_path[512];
+    if (home)
+        snprintf(config_path, sizeof(config_path),
+                 "%s/.mysh/config", home);
+    else
+        snprintf(config_path, sizeof(config_path), ".mysh/config");
+    config_load(config_path);
 
     // Plugin
     char plugin_dir[512];
@@ -82,37 +96,64 @@ int main() {
             char *left = hook_prompt_left();
             if (left) {
                 /* git varsa: ➜  HH:MM user dir (branch) */
+                char time_part[32] = "";
+                char user_part[64] = "";
+                
                 /* saat */
-                time_t t = time(NULL);
-                struct tm *tm = localtime(&t);
-                char timebuf[8];
-                strftime(timebuf, sizeof(timebuf), "%H:%M", tm);
+                if (g_config.prompt_show_time) {
+                    time_t t = time(NULL);
+                    struct tm *tm = localtime(&t);
+                    char timebuf[8];
+                    strftime(timebuf, sizeof(timebuf), "%H:%M", tm);
+                    snprintf(time_part, sizeof(time_part), "\033[0;37m%s\033[0m ", timebuf);
+                }
+                
+                /* kullanıcı */
+                if (g_config.prompt_show_user) {
+                    const char *user = getenv("USER");
+                    if (user) {
+                        snprintf(user_part, sizeof(user_part), "\033[1;36m%s\033[0m ", user);
+                    }
+                }
 
                 snprintf(prompt, sizeof(prompt),
                     "\033[1;32m➜\033[0m  "        /* yeşil ok */
-                    "\033[0;37m%s\033[0m "         /* gri saat */
-                    "\033[1;36m%s\033[0m "         /* cyan kullanıcı */
+                    "%s"                           /* saat */
+                    "%s"                           /* kullanıcı */
                     "\033[1;34m%s\033[0m "         /* mavi dizin */
                     "%s"                           /* git (zaten renkli) */
                     "\033[0m> ",                   /* reset + > */
-                    timebuf,
-                    getenv("USER") ? getenv("USER") : "",
+                    time_part,
+                    user_part,
                     display,
                     left);
                 free(left);
             } else {
-                time_t t = time(NULL);
-                struct tm *tm = localtime(&t);
-                char timebuf[8];
-                strftime(timebuf, sizeof(timebuf), "%H:%M", tm);
+                char time_part[32] = "";
+                char user_part[64] = "";
+                
+                if (g_config.prompt_show_time) {
+                    time_t t = time(NULL);
+                    struct tm *tm = localtime(&t);
+                    char timebuf[8];
+                    strftime(timebuf, sizeof(timebuf), "%H:%M", tm);
+                    snprintf(time_part, sizeof(time_part), "\033[0;37m%s\033[0m ", timebuf);
+                }
+                
+                if (g_config.prompt_show_user) {
+                    const char *user = getenv("USER");
+                    if (user) {
+                        snprintf(user_part, sizeof(user_part), "\033[1;36m%s\033[0m ", user);
+                    }
+                }
 
                 snprintf(prompt, sizeof(prompt),
                     "\033[1;32m➜\033[0m  "
-                    "\033[0;37m%s\033[0m "
-                    "\033[1;36m%s\033[0m "
+                    "%s"
+                    "%s"
                     "\033[1;34m%s\033[0m> ",
-                    timebuf,
-                    getenv("USER") ? getenv("USER") : "",
+                    time_part,
+                    user_part,
                     display);
             }
         } else {

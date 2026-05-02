@@ -33,7 +33,7 @@ Job  *job_get_by_id(int id);
 
 /* signals.c */
 void signals_init(void);
-void signals_child(void);   /* child fork'tan sonra çağrılır */
+void signals_child(void);
 
 
-#endif //MYSHELL_JOBS_H
+#endif //JOBS_H

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "../include/config.h"
 
 /* ANSI color codes */
 #define COL_RESET       "\033[0m"
@@ -91,6 +92,8 @@ static const char *word_color(const char *word, int is_first_word) {
 
 /* Main function: highlight */
 char *highlight(const char *buf, int len) {
+    if (!g_config.highlight_enabled) return strdup(buf);
+    
     if (!buf || len == 0) {
         return strdup("");
     }

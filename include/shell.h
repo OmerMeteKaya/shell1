@@ -5,8 +5,6 @@
 #ifndef MYSHELL_SHELL_H
 #define MYSHELL_SHELL_H
 
-#include <stddef.h>
-#include <glob.h>
 
 #define MAX_ARGS    64
 #define MAX_TOKENS  256
