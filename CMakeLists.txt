@@ -28,4 +28,5 @@ add_executable(shell
         src/plugin.c
         src/highlight.c
         include/highlight.h
-        include/completions.h)
+        include/completions.h
+        src/completions.c)
