@@ -843,7 +843,8 @@ impl Parser {
                 }
                 // Keyword tokens in argument position are treated as plain words
                 // (e.g. `type if`, `echo do`, `echo then`)
-                _ if !words.is_empty() && is_keyword_tok(self.peek_kind()) => {
+                // Also allow ! as a word in argument position (for test ! -f)
+                _ if !words.is_empty() && (is_keyword_tok(self.peek_kind()) || self.peek_kind() == &TokKind::Bang) => {
                     let mut tok = self.consume();
                     tok.kind = TokKind::Word;
                     words.push(tok);
@@ -941,14 +942,21 @@ impl Parser {
                 } else {
                     (delim_tok.value.clone(), String::new())
                 };
-                let _ = (strip, delim);
+                let _ = strip; // tab-stripping already applied during lexing
+                // If the delimiter was quoted (<<'EOF' or <<"EOF"), variable expansion is suppressed.
+                let no_expand = delim.contains('\'') || delim.contains('"') || delim.contains('\\');
+                let heredoc_content = if no_expand {
+                    format!("\x00NEXPAND\x00{}", content)
+                } else {
+                    content
+                };
                 Some(FdRedir {
                     src_fd: 0,
                     dst_fd: -2,
                     file: None,
                     append: false,
                     is_input: true,
-                    heredoc_content: Some(content),
+                    heredoc_content: Some(heredoc_content),
                     is_herestr: false,
                     is_procsubst: false,
                     dst_fd_word: None,

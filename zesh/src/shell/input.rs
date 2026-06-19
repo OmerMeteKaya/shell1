@@ -999,8 +999,7 @@ pub fn read_line(prompt: &str) -> Option<String> {
                 }
                 if panel_en { panel_items = panel_rebuild(&buf, len, pos); }
                 panel_sel = -1;
-                if panel_en { panel_render(&panel_items, panel_sel, &mut panel_rows); }
-                ml_prev_rows = render_ml(prompt, &buf, len, pos, ml_prev_rows, hl, suggestions);
+                // Skip render — accumulate all paste chars and redraw once at paste end.
                 continue;
             }
 
@@ -1187,6 +1186,7 @@ pub fn read_line(prompt: &str) -> Option<String> {
                         in_paste = true;
                     } else if b3 == b'0' && b4 == b'1' && b5 == b'~' {
                         in_paste = false;
+                        ml_prev_rows = render_ml(prompt, &buf, len, pos, ml_prev_rows, hl, suggestions);
                     }
                     // unknown ESC[2…~ sequence — ignore
                     continue;

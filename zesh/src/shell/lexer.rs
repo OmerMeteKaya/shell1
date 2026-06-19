@@ -578,7 +578,12 @@ impl Lexer {
                 }
                 Some('!') => {
                     self.advance();
-                    tokens.push(Token { kind: TokKind::Bang, value: "!".to_string(), quoted: false, line });
+                    if self.peek() == Some('=') {
+                        self.advance();
+                        tokens.push(Token { kind: TokKind::Word, value: "!=".to_string(), quoted: false, line });
+                    } else {
+                        tokens.push(Token { kind: TokKind::Bang, value: "!".to_string(), quoted: false, line });
+                    }
                 }
                 Some('<') => {
                     self.advance();
@@ -780,58 +785,95 @@ impl Lexer {
 
     fn process_heredocs(&mut self, tokens: &mut Vec<Token>) {
         let mut i = 0;
+        let mut next_body_start: u32 = 0;
+        let mut last_redir_line: u32 = 0;
+
         while i < tokens.len() {
             if tokens[i].kind == TokKind::RedirHeredoc {
                 if i + 1 < tokens.len() {
                     let delim_raw = tokens[i + 1].value.clone();
                     let strip_tabs = tokens[i].value == "<<-";
-                    let content = self.collect_heredoc(&delim_raw, strip_tabs);
+                    let delim_line = tokens[i + 1].line;
+
+                    // For multiple heredocs on the same command line, bodies follow each other.
+                    let start_line = if delim_line == last_redir_line && next_body_start > 0 {
+                        next_body_start
+                    } else {
+                        delim_line + 1
+                    };
+
+                    let bare_delim: String = delim_raw.chars()
+                        .filter(|&c| c != '\'' && c != '"' && c != '\\')
+                        .collect();
+                    let bare_delim = bare_delim.trim().to_string();
+
+                    let (content, lines_consumed) =
+                        self.collect_heredoc_from_line(start_line, &bare_delim, strip_tabs);
+
                     tokens[i + 1].value = format!("\x00HEREDOC\x00{}\x00{}", delim_raw, content);
+
+                    if lines_consumed > 0 {
+                        let last_body_line = start_line + lines_consumed - 1;
+                        last_redir_line = delim_line;
+                        next_body_start = last_body_line + 1;
+
+                        // Remove tokens that belong to the heredoc body and closing delimiter.
+                        // These are all tokens whose line is in [start_line, last_body_line].
+                        // Tokens at indices <= i+1 are on lines <= delim_line < start_line and are kept.
+                        let s = start_line;
+                        let e = last_body_line;
+                        tokens.retain(|tok| tok.line < s || tok.line > e);
+                    }
                 }
             }
             i += 1;
         }
     }
 
-    fn collect_heredoc(&mut self, delim_raw: &str, strip_tabs: bool) -> String {
-        if self.pos > self.input.len() {
-            return String::new();
+    // Return the start byte-index in self.input of the given 1-based line number.
+    fn find_line_start(&self, line: u32) -> usize {
+        if line <= 1 {
+            return 0;
         }
-        // Strip quotes from delimiter for comparison
-        let bare_delim: String = delim_raw.chars()
-            .filter(|&c| c != '\'' && c != '"' && c != '\\')
-            .collect();
-        let bare_delim = bare_delim.trim();
+        let mut current = 1u32;
+        for (idx, &c) in self.input.iter().enumerate() {
+            if c == '\n' {
+                current += 1;
+                if current == line {
+                    return idx + 1;
+                }
+            }
+        }
+        self.input.len()
+    }
+
+    // Collect heredoc body starting at `start_line` in self.input.
+    // Returns (content, lines_consumed) where lines_consumed includes the closing delimiter line.
+    fn collect_heredoc_from_line(&self, start_line: u32, bare_delim: &str, strip_tabs: bool) -> (String, u32) {
+        let start_pos = self.find_line_start(start_line);
+        if start_pos >= self.input.len() {
+            return (String::new(), 0);
+        }
+        let remaining_str: String = self.input[start_pos..].iter().collect();
+        if remaining_str.is_empty() {
+            return (String::new(), 0);
+        }
 
         let mut content = String::new();
-        let remaining: Vec<char> = self.input[self.pos..].iter().copied().collect();
-        let remaining_str: String = remaining.iter().collect();
+        let mut lines_consumed = 0u32;
 
-        let mut chars_consumed = 0;
-        for line in remaining_str.split('\n') {
-            chars_consumed += line.chars().count() + 1; // +1 for \n (char count, not bytes)
-
-            let check = if strip_tabs {
-                line.trim_start_matches('\t')
-            } else {
-                line
-            };
-
+        for line in remaining_str.lines() {
+            lines_consumed += 1;
+            let check = if strip_tabs { line.trim_start_matches('\t') } else { line };
             if check == bare_delim {
                 break;
             }
-
-            let actual_line = if strip_tabs {
-                line.trim_start_matches('\t').to_string()
-            } else {
-                line.to_string()
-            };
-            content.push_str(&actual_line);
+            let actual = if strip_tabs { line.trim_start_matches('\t') } else { line };
+            content.push_str(actual);
             content.push('\n');
         }
 
-        self.pos += chars_consumed.min(remaining.len());
-        content
+        (content, lines_consumed)
     }
 }
 

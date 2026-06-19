@@ -336,8 +336,12 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
     }
 
     if let Some(content) = &redir.heredoc_content {
-        // Heredoc - expand variables in content
-        let expanded = expand_string(content, vars, &ctx.script_file);
+        // Heredoc - expand variables unless the delimiter was quoted (\x00NEXPAND\x00 prefix).
+        let expanded = if let Some(literal) = content.strip_prefix("\x00NEXPAND\x00") {
+            literal.to_string()
+        } else {
+            expand_string(content, vars, &ctx.script_file)
+        };
         let mut pipe_fds = [0i32; 2];
         // SAFETY: pipe() with valid ptr
         if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {
