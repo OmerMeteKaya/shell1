@@ -413,11 +413,30 @@ impl Lexer {
         // Read a word token, handling quoting. Returns (value, quoted)
         let mut value = String::new();
         let mut quoted = false;
+        // Track if we're inside a \${...} sequence (literal braces after escaped $)
+        let mut in_escaped_brace = false;
 
         loop {
             match self.peek() {
                 None => break,
-                Some(c) if is_word_break(c) => break,
+                Some(c) if is_word_break(c) => {
+                    // Don't stop at { if preceded by \$ (escaped dollar sign)
+                    if c == '{' && value.ends_with("\\$") {
+                        // Start tracking that we're in a literal ${...}
+                        value.push(c);
+                        self.advance();
+                        in_escaped_brace = true;
+                        continue;
+                    }
+                    // Don't stop at } if we're inside a \${...} sequence
+                    if c == '}' && in_escaped_brace {
+                        value.push(c);
+                        self.advance();
+                        in_escaped_brace = false;
+                        continue;
+                    }
+                    break;
+                }
                 Some('\'') => {
                     quoted = true;
                     self.advance();

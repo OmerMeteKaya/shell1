@@ -881,7 +881,7 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         }
     }
 
-    // ${VAR:offset:length} - substring
+    // ${VAR:offset:length} - substring (or array slice for ${arr[@]:offset:length})
     if let Some(colon1) = find_colon_outside_parens(content) {
         let name = &content[..colon1];
         let rest = &content[colon1+1..];
@@ -890,7 +890,37 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         // Try to parse what comes next as a number (offset)
         let parts: Vec<&str> = rest.splitn(2, ':').collect();
         if let Ok(offset) = parts[0].trim().parse::<i64>() {
-            // It's a number, so treat as substring
+            // ${arr[@]:offset} or ${arr[@]:offset:length} — slice element list
+            let is_all = name.ends_with("[@]") || name.ends_with("[*]");
+            if is_all {
+                let arr_name = &name[..name.len()-3];
+                if let Some(arr) = vars.get_array(arr_name) {
+                    let mut keys: Vec<usize> = arr.keys().copied().collect();
+                    keys.sort();
+                    let elems: Vec<&str> = keys.iter().map(|k| arr[k].as_str()).collect();
+                    let elen = elems.len() as i64;
+                    let start = if offset < 0 {
+                        (elen + offset).max(0) as usize
+                    } else {
+                        (offset as usize).min(elems.len())
+                    };
+                    if parts.len() > 1 {
+                        if let Ok(length) = parts[1].trim().parse::<i64>() {
+                            let end = if length < 0 {
+                                (elen + length).max(0) as usize
+                            } else {
+                                (start as i64 + length).min(elen) as usize
+                            };
+                            let end = end.max(start);
+                            return elems.get(start..end).map(|s| s.join(" ")).unwrap_or_default();
+                        }
+                    }
+                    return elems.get(start..).map(|s| s.join(" ")).unwrap_or_default();
+                }
+                return String::new();
+            }
+
+            // Scalar substring
             let val = get_var_value(name, vars, script_file);
             let chars: Vec<char> = val.chars().collect();
             let slen = chars.len() as i64;

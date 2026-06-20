@@ -119,53 +119,56 @@ impl Parser {
     }
 
     fn parse_and_or_inner(&mut self) -> Option<CmdNode> {
-        let mut left = self.parse_pipeline()?;
+        let first = self.parse_pipeline()?;
+
+        // Fast path: no chain operator follows
+        match self.peek_kind() {
+            TokKind::And | TokKind::Or => {}
+            _ => return Some(first),
+        }
+
+        let line = first.lineno;
+        let mut chain: Vec<CmdNode> = vec![first];
 
         loop {
-            match self.peek_kind() {
+            match self.peek_kind().clone() {
                 TokKind::And => {
                     self.advance();
                     self.skip_newlines();
-                    left.op = NodeOp::And;
-                    let right = self.parse_pipeline()?;
-                    // Wrap as a list
-                    let line = left.lineno;
-                    let nodes = vec![left, right];
-                    left = CmdNode {
-                        kind: CompoundKind::Brace(nodes),
-                        redirs: vec![],
-                        background: false,
-                        negate: false,
-                        op: NodeOp::End,
-                        lineno: line,
-                    };
-                    // Actually: we keep it flat with op=And
-                    // Let's redo this: keep left as is, then we return a "list" node
-                    // Simpler: return AND node
-                    break;
+                    // The && operator sits on the node that precedes it
+                    if let Some(prev) = chain.last_mut() {
+                        prev.op = NodeOp::And;
+                    }
+                    match self.parse_pipeline() {
+                        Some(right) => chain.push(right),
+                        None => break,
+                    }
                 }
                 TokKind::Or => {
                     self.advance();
                     self.skip_newlines();
-                    left.op = NodeOp::Or;
-                    let right = self.parse_pipeline()?;
-                    let line = left.lineno;
-                    let nodes = vec![left, right];
-                    left = CmdNode {
-                        kind: CompoundKind::Brace(nodes),
-                        redirs: vec![],
-                        background: false,
-                        negate: false,
-                        op: NodeOp::End,
-                        lineno: line,
-                    };
-                    break;
+                    if let Some(prev) = chain.last_mut() {
+                        prev.op = NodeOp::Or;
+                    }
+                    match self.parse_pipeline() {
+                        Some(right) => chain.push(right),
+                        None => break,
+                    }
                 }
                 _ => break,
             }
         }
 
-        Some(left)
+        // Wrap the entire &&/|| chain in a Brace so execute_list sees a flat
+        // node list with the correct per-node ops and evaluates it correctly.
+        Some(CmdNode {
+            kind: CompoundKind::Brace(chain),
+            redirs: vec![],
+            background: false,
+            negate: false,
+            op: NodeOp::End,
+            lineno: line,
+        })
     }
 
     fn parse_pipeline(&mut self) -> Option<CmdNode> {

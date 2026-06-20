@@ -121,34 +121,172 @@ fn printf_format(fmt: &str, args: &[String]) -> String {
         } else if chars[i] == '%' {
             i += 1;
             if i >= chars.len() { break; }
-            match chars[i] {
-                's' => {
-                    let arg = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
-                    result.push_str(arg);
-                    arg_idx += 1;
+
+            // %% literal percent
+            if chars[i] == '%' {
+                result.push('%');
+                i += 1;
+                continue;
+            }
+
+            // Parse optional flags: -, 0, +, space, #
+            let mut flag_left  = false;
+            let mut flag_zero  = false;
+            let mut flag_plus  = false;
+            let mut flag_space = false;
+            loop {
+                match chars.get(i).copied() {
+                    Some('-') => { flag_left = true;  i += 1; }
+                    Some('0') => { flag_zero = true;  i += 1; }
+                    Some('+') => { flag_plus = true;  i += 1; }
+                    Some(' ') => { flag_space = true; i += 1; }
+                    Some('#') => { i += 1; } // alternate form (not needed for tested cases)
+                    _ => break,
+                }
+            }
+
+            // Parse optional width
+            let mut width = 0usize;
+            while let Some(c) = chars.get(i).copied() {
+                if c.is_ascii_digit() {
+                    width = width * 10 + (c as usize - '0' as usize);
                     i += 1;
+                } else {
+                    break;
+                }
+            }
+
+            // Parse optional precision: .digits
+            let mut precision: Option<usize> = None;
+            if chars.get(i).copied() == Some('.') {
+                i += 1;
+                let mut prec = 0usize;
+                while let Some(c) = chars.get(i).copied() {
+                    if c.is_ascii_digit() {
+                        prec = prec * 10 + (c as usize - '0' as usize);
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                precision = Some(prec);
+            }
+
+            // Conversion character
+            let conv = match chars.get(i).copied() {
+                Some(c) => { i += 1; c }
+                None => break,
+            };
+
+            // Apply padding helper: pad `s` to `width` chars respecting flags
+            let pad = |s: String, width: usize, left: bool, zero: bool| -> String {
+                if width == 0 || s.len() >= width {
+                    return s;
+                }
+                let pad_char = if zero && !left { '0' } else { ' ' };
+                let pad_count = width - s.len();
+                let padding: String = std::iter::repeat(pad_char).take(pad_count).collect();
+                if left {
+                    format!("{}{}", s, padding)
+                } else {
+                    // For zero-padding integers, keep sign/prefix before zeros
+                    if zero && (s.starts_with('-') || s.starts_with('+')) {
+                        let (sign, digits) = s.split_at(1);
+                        format!("{}{}{}", sign, padding, digits)
+                    } else {
+                        format!("{}{}", padding, s)
+                    }
+                }
+            };
+
+            match conv {
+                's' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("").to_string();
+                    arg_idx += 1;
+                    let s = if let Some(prec) = precision {
+                        raw.chars().take(prec).collect()
+                    } else {
+                        raw
+                    };
+                    result.push_str(&pad(s, width, flag_left, false));
                 }
                 'd' | 'i' => {
-                    let arg = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                    let n: i64 = arg.trim().parse().unwrap_or(0);
-                    result.push_str(&n.to_string());
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                     arg_idx += 1;
-                    i += 1;
+                    let n: i64 = raw.trim().parse().unwrap_or(0);
+                    let s = if flag_plus && n >= 0 {
+                        format!("+{}", n)
+                    } else if flag_space && n >= 0 {
+                        format!(" {}", n)
+                    } else {
+                        n.to_string()
+                    };
+                    result.push_str(&pad(s, width, flag_left, flag_zero));
                 }
-                'f' => {
-                    let arg = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
-                    let n: f64 = arg.trim().parse().unwrap_or(0.0);
-                    result.push_str(&format!("{:.6}", n));
+                'u' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
                     arg_idx += 1;
-                    i += 1;
+                    let n: u64 = raw.trim().parse().unwrap_or(0);
+                    result.push_str(&pad(n.to_string(), width, flag_left, flag_zero));
                 }
-                '%' => {
-                    result.push('%');
-                    i += 1;
+                'x' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                    arg_idx += 1;
+                    let n: i64 = raw.trim().parse().unwrap_or(0);
+                    let s = format!("{:x}", n as u64);
+                    result.push_str(&pad(s, width, flag_left, flag_zero));
+                }
+                'X' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                    arg_idx += 1;
+                    let n: i64 = raw.trim().parse().unwrap_or(0);
+                    let s = format!("{:X}", n as u64);
+                    result.push_str(&pad(s, width, flag_left, flag_zero));
+                }
+                'o' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                    arg_idx += 1;
+                    let n: i64 = raw.trim().parse().unwrap_or(0);
+                    let s = format!("{:o}", n as u64);
+                    result.push_str(&pad(s, width, flag_left, flag_zero));
+                }
+                'f' | 'F' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                    arg_idx += 1;
+                    let n: f64 = raw.trim().parse().unwrap_or(0.0);
+                    let prec = precision.unwrap_or(6);
+                    let s = if flag_plus && n >= 0.0 {
+                        format!("+{:.prec$}", n, prec = prec)
+                    } else {
+                        format!("{:.prec$}", n, prec = prec)
+                    };
+                    result.push_str(&pad(s, width, flag_left, flag_zero));
+                }
+                'e' | 'E' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("0");
+                    arg_idx += 1;
+                    let n: f64 = raw.trim().parse().unwrap_or(0.0);
+                    let prec = precision.unwrap_or(6);
+                    let s = format!("{:.prec$e}", n, prec = prec);
+                    let s = if conv == 'E' { s.to_uppercase() } else { s };
+                    result.push_str(&pad(s, width, flag_left, flag_zero));
+                }
+                'c' => {
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("");
+                    arg_idx += 1;
+                    let c = raw.chars().next().unwrap_or('\0');
+                    result.push(c);
+                }
+                'b' => {
+                    // %b: like %s but interpret backslash escapes
+                    let raw = args.get(arg_idx).map(|s| s.as_str()).unwrap_or("").to_string();
+                    arg_idx += 1;
+                    result.push_str(&interpret_escape_seq(&raw));
                 }
                 _ => {
+                    // Unknown conversion: emit as-is
                     result.push('%');
-                    i += 1;
+                    result.push(conv);
                 }
             }
         } else {
@@ -325,6 +463,17 @@ pub fn builtin_unset(args: &[String], vars: &mut VarStore) -> i32 {
             name => {
                 if flags_f {
                     vars.functions.remove(name);
+                } else if let Some(bracket) = name.find('[') {
+                    // unset arr[N] — remove a single array element
+                    if name.ends_with(']') {
+                        let arr_name = &name[..bracket];
+                        let idx_str = &name[bracket+1..name.len()-1];
+                        if let Ok(idx) = crate::shell::expand::eval_arith_simple(idx_str) {
+                            if let Some(arr) = vars.arrays.get_mut(arr_name) {
+                                arr.remove(&(idx as usize));
+                            }
+                        }
+                    }
                 } else {
                     vars.unset(name);
                     if flags_a {
