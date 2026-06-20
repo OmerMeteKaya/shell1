@@ -139,6 +139,7 @@ impl VarStore {
         // Check readonly
         if attrs & ATTR_READONLY != 0 {
             eprintln!("zesh: {}: readonly variable", name);
+            READONLY_ERROR_FLAG.with(|e| *e.borrow_mut() = true);
             return;
         }
 
@@ -273,6 +274,21 @@ fn apply_attrs(value: String, attrs: u32) -> String {
     } else {
         value
     }
+}
+
+// Thread-local flag signalling that a readonly assignment was attempted.
+// Executor checks this after each vars.set() call to implement POSIX fatal-error
+// behavior (abort script in non-interactive mode).
+thread_local! {
+    static READONLY_ERROR_FLAG: std::cell::RefCell<bool> = std::cell::RefCell::new(false);
+}
+
+pub fn take_readonly_error() -> bool {
+    READONLY_ERROR_FLAG.with(|e| {
+        let v = *e.borrow();
+        *e.borrow_mut() = false;
+        v
+    })
 }
 
 // Global var store (used by binary, not the C lib)

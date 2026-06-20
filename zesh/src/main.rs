@@ -91,8 +91,18 @@ fn main() {
 
         std::process::exit(status);
     } else {
-        // Interactive REPL
-        run_interactive(&mut ctx, &mut vars, start_time);
+        // SAFETY: isatty() is safe to call with fd 0 (always valid)
+        let stdin_is_tty = unsafe { libc::isatty(0) } == 1;
+        if stdin_is_tty {
+            run_interactive(&mut ctx, &mut vars, start_time);
+        } else {
+            // Non-interactive stdin: read all of stdin and execute as a script
+            use std::io::Read;
+            let mut content = String::new();
+            let _ = std::io::stdin().read_to_string(&mut content);
+            let status = run_script(&content, "stdin", &mut ctx, &mut vars);
+            std::process::exit(status);
+        }
     }
 }
 

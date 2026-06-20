@@ -564,7 +564,7 @@ fn expand_string_inner(s: &str, vars: &crate::shell::vars::VarStore, script_file
             }
             '~' => {
                 // Tilde expansion at start or after :
-                let tilde_result = expand_tilde(&chars, i);
+                let tilde_result = expand_tilde(&chars, i, vars);
                 result.push_str(&tilde_result.0);
                 i += tilde_result.1;
             }
@@ -586,7 +586,7 @@ fn expand_string_inner(s: &str, vars: &crate::shell::vars::VarStore, script_file
     result
 }
 
-fn expand_tilde(chars: &[char], start: usize) -> (String, usize) {
+fn expand_tilde(chars: &[char], start: usize, vars: &crate::shell::vars::VarStore) -> (String, usize) {
     let mut i = start + 1; // skip ~
     let mut name = String::new();
     while i < chars.len() && chars[i] != '/' && chars[i] != ':' && chars[i] != ' ' && chars[i] != '\t' {
@@ -597,9 +597,11 @@ fn expand_tilde(chars: &[char], start: usize) -> (String, usize) {
 
     if name.is_empty() {
         // ~ alone -> $HOME
-        let home = std::env::var("HOME").unwrap_or_else(|_| {
-            // Try getpwuid
-            get_home_dir_by_uid(unsafe { libc::getuid() })
+        let home = vars.get_str("HOME").unwrap_or_else(|| {
+            std::env::var("HOME").unwrap_or_else(|_| {
+                // Try getpwuid
+                get_home_dir_by_uid(unsafe { libc::getuid() })
+            })
         });
         return (home, consumed);
     }
@@ -667,7 +669,11 @@ fn expand_dollar(chars: &[char], start: usize, vars: &crate::shell::vars::VarSto
                 let (expr, consumed) = read_until_double_paren(&chars[i..]);
                 let val = match eval_arith_expr_with_vars(&expr, vars) {
                     Ok(n) => n.to_string(),
-                    Err(_) => "0".to_string(),
+                    Err(e) => {
+                        eprintln!("zesh: {}", e);
+                        PARAM_ERROR.with(|err| *err.borrow_mut() = true);
+                        String::new()
+                    }
                 };
                 (val, 3 + consumed) // $, (, (, content, ), )
             } else {
@@ -1290,29 +1296,48 @@ fn glob_match_chars(pat: &[char], pi: usize, s: &[char], si: usize) -> bool {
             si < s.len() && glob_match_chars(pat, pi + 1, s, si + 1)
         }
         '[' => {
-            // Character class
+            // Character class - but only if it has a closing ]
             let mut pi2 = pi + 1;
             let negate = pi2 < pat.len() && pat[pi2] == '!';
             if negate { pi2 += 1; }
-            let mut matched = false;
+            let mut has_closing_bracket = false;
             let mut first = true;
-            while pi2 < pat.len() && (first || pat[pi2] != ']') {
-                first = false;
-                if pi2 + 2 < pat.len() && pat[pi2 + 1] == '-' && pat[pi2 + 2] != ']' {
-                    if si < s.len() && s[si] >= pat[pi2] && s[si] <= pat[pi2 + 2] {
-                        matched = true;
-                    }
-                    pi2 += 3;
-                } else {
-                    if si < s.len() && s[si] == pat[pi2] {
-                        matched = true;
-                    }
-                    pi2 += 1;
+            let mut test_pi2 = pi2;
+            // First, check if there's a valid closing bracket
+            while test_pi2 < pat.len() {
+                if pat[test_pi2] == ']' && !first {
+                    has_closing_bracket = true;
+                    break;
                 }
+                first = false;
+                test_pi2 += 1;
             }
-            if pi2 < pat.len() { pi2 += 1; } // skip ]
-            let result = if negate { !matched } else { matched };
-            result && si < s.len() && glob_match_chars(pat, pi2, s, si + 1)
+
+            if has_closing_bracket {
+                // Valid character class
+                let mut matched = false;
+                first = true;
+                while pi2 < pat.len() && (first || pat[pi2] != ']') {
+                    first = false;
+                    if pi2 + 2 < pat.len() && pat[pi2 + 1] == '-' && pat[pi2 + 2] != ']' {
+                        if si < s.len() && s[si] >= pat[pi2] && s[si] <= pat[pi2 + 2] {
+                            matched = true;
+                        }
+                        pi2 += 3;
+                    } else {
+                        if si < s.len() && s[si] == pat[pi2] {
+                            matched = true;
+                        }
+                        pi2 += 1;
+                    }
+                }
+                if pi2 < pat.len() { pi2 += 1; } // skip ]
+                let result = if negate { !matched } else { matched };
+                result && si < s.len() && glob_match_chars(pat, pi2, s, si + 1)
+            } else {
+                // No closing bracket - treat '[' as literal
+                si < s.len() && s[si] == '[' && glob_match_chars(pat, pi + 1, s, si + 1)
+            }
         }
         '\\' if pi + 1 < pat.len() => {
             si < s.len() && s[si] == pat[pi + 1] && glob_match_chars(pat, pi + 2, s, si + 1)
@@ -1511,7 +1536,11 @@ fn expand_vars_in_arith(expr: &str, vars: &crate::shell::vars::VarStore) -> Stri
                     let (inner_expr, consumed) = read_until_double_paren(&chars[i..]);
                     let val = match eval_arith_expr_with_vars(&inner_expr, vars) {
                         Ok(n) => n.to_string(),
-                        Err(_) => "0".to_string(),
+                        Err(e) => {
+                            eprintln!("zesh: {}", e);
+                            PARAM_ERROR.with(|err| *err.borrow_mut() = true);
+                            "0".to_string()
+                        }
                     };
                     result.push_str(&val);
                     i += consumed;

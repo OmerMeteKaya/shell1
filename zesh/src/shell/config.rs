@@ -295,7 +295,5 @@ show_time = true             # Show timestamp\n\
 show_user = true             # Show username\n\
 show_hostname = false        # Show hostname\n\
 style = \"simple\"             # Prompt style: simple, powerline, minimal\n";
-    if let Err(e) = std::fs::write(&path, default_toml) {
-        eprintln!("zesh: failed to write default config: {}", e);
-    }
+    let _ = std::fs::write(&path, default_toml);
 }

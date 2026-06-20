@@ -229,8 +229,11 @@ where F: FnOnce(&mut ExecContext, &mut VarStore) -> i32
         return f(ctx, vars);
     }
 
-    // Save and apply redirections
-    let saved = apply_redirections_save(redirs, ctx, vars);
+    // Save and apply redirections; abort if any redirect fails
+    let saved = match apply_redirections_save(redirs, ctx, vars) {
+        Ok(s) => s,
+        Err(partial) => { restore_redirections(partial); return 1; }
+    };
     let status = f(ctx, vars);
     restore_redirections(saved);
     status
@@ -241,14 +244,18 @@ pub struct SavedFd {
     pub saved_fd: RawFd,
 }
 
-fn apply_redirections_save(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> Vec<SavedFd> {
+// Returns Ok(saved) on success, or Err(partial_saved) on the first failure.
+// Partial saved contains any redirects that were applied before the failure
+// and must be restored by the caller.
+fn apply_redirections_save(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> Result<Vec<SavedFd>, Vec<SavedFd>> {
     let mut saved = Vec::new();
     for redir in redirs {
-        if let Some(s) = apply_one_redir_save(redir, ctx, vars) {
-            saved.push(s);
+        match apply_one_redir_save(redir, ctx, vars) {
+            Some(s) => saved.push(s),
+            None => return Err(saved),
         }
     }
-    saved
+    Ok(saved)
 }
 
 fn apply_one_redir_save(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarStore) -> Option<SavedFd> {
@@ -413,8 +420,12 @@ fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext
     let all_redirs: Vec<FdRedir> = cmd.redirs.iter().chain(extra_redirs.iter()).cloned().collect();
 
     // Apply redirections BEFORE word expansion so that ${var:?msg} errors and
-    // other expansion side-effects go to the redirected fd (e.g. 2>&1 captures errors)
-    let early_saved = apply_redirections_save(&all_redirs, ctx, vars);
+    // other expansion side-effects go to the redirected fd (e.g. 2>&1 captures errors).
+    // If any redirect target cannot be opened, abort the command immediately (POSIX).
+    let early_saved = match apply_redirections_save(&all_redirs, ctx, vars) {
+        Ok(s) => s,
+        Err(partial) => { restore_redirections(partial); return 1; }
+    };
 
     // Expand assignments
     let mut local_assigns: Vec<(String, String)> = Vec::new();
@@ -457,8 +468,12 @@ fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext
 
     // If no words, just apply assignments
     if argv.is_empty() {
+        let mut assign_status = 0;
         for (k, v) in &local_assigns {
             vars.set(k, v.clone());
+            if crate::shell::vars::take_readonly_error() {
+                assign_status = 1;
+            }
         }
         // Process array literal assignments ARR=(elem1 elem2 ...)
         for (arr_name, elems) in &cmd.array_assigns {
@@ -470,8 +485,12 @@ fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext
         }
         // Apply redirections without command
         with_redirections(&all_redirs, ctx, vars, |_, _| 0);
-        // Return cmdsub exit status if any (e.g. PERR=$(failing_cmd))
-        let ret = cmdsub_status.unwrap_or(0);
+        // Return readonly error status if any, else cmdsub exit status
+        let ret = if assign_status != 0 {
+            assign_status
+        } else {
+            cmdsub_status.unwrap_or(0)
+        };
         ctx.exit_status = ret;
         vars.set_raw("?", ret.to_string(), 0);
         return ret;
@@ -712,12 +731,12 @@ fn execute_for(var: &str, words: &[Token], body: &[CmdNode], ctx: &mut ExecConte
 }
 
 fn execute_case(word: &Token, arms: &[CaseArm], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
-    let expanded_word = expand_word_single(word, vars, &ctx.script_file);
+    let expanded_word = expand_string(&word.value, vars, &ctx.script_file);
 
     for arm in arms {
         let mut matched = false;
         for pat in &arm.patterns {
-            let pat_str = expand_word_single(pat, vars, &ctx.script_file);
+            let pat_str = expand_string(&pat.value, vars, &ctx.script_file);
             if pat_str == "*" || crate::shell::expand::glob_match(&pat_str, &expanded_word) {
                 matched = true;
                 break;
@@ -1337,7 +1356,10 @@ pub fn run_script(script: &str, script_file: &str, ctx: &mut ExecContext, vars: 
 
 // Public helpers for builtins
 pub fn apply_redirections_for_builtin(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> Vec<SavedFd> {
-    apply_redirections_save(redirs, ctx, vars)
+    match apply_redirections_save(redirs, ctx, vars) {
+        Ok(s) => s,
+        Err(partial) => { restore_redirections(partial); Vec::new() }
+    }
 }
 
 pub fn restore_redirections_builtin(saved: Vec<SavedFd>) {
