@@ -44,6 +44,12 @@ enum ATok {
     LShift, RShift,
     LParen, RParen,
     Question, Colon,
+    // Assignment operators
+    Eq,
+    PlusEq, MinusEq, StarEq, SlashEq, PercentEq,
+    AmpEq, PipeEq, CaretEq, LShiftEq, RShiftEq,
+    // Increment/decrement
+    PlusPlus, MinusMinus,
 }
 
 fn arith_tokenize(s: &str) -> Result<Vec<ATok>, String> {
@@ -93,36 +99,50 @@ fn arith_tokenize(s: &str) -> Result<Vec<ATok>, String> {
             }
             '+' => {
                 if i + 1 < chars.len() && chars[i+1] == '+' {
-                    tokens.push(ATok::Plus); tokens.push(ATok::Plus);
-                    i += 2;
+                    tokens.push(ATok::PlusPlus); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::PlusEq); i += 2;
                 } else {
-                    tokens.push(ATok::Plus);
-                    i += 1;
+                    tokens.push(ATok::Plus); i += 1;
                 }
             }
             '-' => {
                 if i + 1 < chars.len() && chars[i+1] == '-' {
-                    tokens.push(ATok::Minus); tokens.push(ATok::Minus);
-                    i += 2;
+                    tokens.push(ATok::MinusMinus); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::MinusEq); i += 2;
                 } else {
-                    tokens.push(ATok::Minus);
-                    i += 1;
+                    tokens.push(ATok::Minus); i += 1;
                 }
             }
             '*' => {
                 if i + 1 < chars.len() && chars[i+1] == '*' {
-                    tokens.push(ATok::StarStar);
-                    i += 2;
+                    tokens.push(ATok::StarStar); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::StarEq); i += 2;
                 } else {
-                    tokens.push(ATok::Star);
-                    i += 1;
+                    tokens.push(ATok::Star); i += 1;
                 }
             }
-            '/' => { tokens.push(ATok::Slash); i += 1; }
-            '%' => { tokens.push(ATok::Percent); i += 1; }
+            '/' => {
+                if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::SlashEq); i += 2;
+                } else {
+                    tokens.push(ATok::Slash); i += 1;
+                }
+            }
+            '%' => {
+                if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::PercentEq); i += 2;
+                } else {
+                    tokens.push(ATok::Percent); i += 1;
+                }
+            }
             '&' => {
                 if i + 1 < chars.len() && chars[i+1] == '&' {
                     tokens.push(ATok::AmpAmp); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::AmpEq); i += 2;
                 } else {
                     tokens.push(ATok::Amp); i += 1;
                 }
@@ -130,11 +150,19 @@ fn arith_tokenize(s: &str) -> Result<Vec<ATok>, String> {
             '|' => {
                 if i + 1 < chars.len() && chars[i+1] == '|' {
                     tokens.push(ATok::PipePipe); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::PipeEq); i += 2;
                 } else {
                     tokens.push(ATok::Pipe); i += 1;
                 }
             }
-            '^' => { tokens.push(ATok::Caret); i += 1; }
+            '^' => {
+                if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::CaretEq); i += 2;
+                } else {
+                    tokens.push(ATok::Caret); i += 1;
+                }
+            }
             '~' => { tokens.push(ATok::Tilde); i += 1; }
             '!' => {
                 if i + 1 < chars.len() && chars[i+1] == '=' {
@@ -147,23 +175,27 @@ fn arith_tokenize(s: &str) -> Result<Vec<ATok>, String> {
                 if i + 1 < chars.len() && chars[i+1] == '=' {
                     tokens.push(ATok::EqEq); i += 2;
                 } else {
-                    i += 1; // skip lone =
+                    tokens.push(ATok::Eq); i += 1;
                 }
             }
             '<' => {
-                if i + 1 < chars.len() && chars[i+1] == '=' {
-                    tokens.push(ATok::LtEq); i += 2;
+                if i + 2 < chars.len() && chars[i+1] == '<' && chars[i+2] == '=' {
+                    tokens.push(ATok::LShiftEq); i += 3;
                 } else if i + 1 < chars.len() && chars[i+1] == '<' {
                     tokens.push(ATok::LShift); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::LtEq); i += 2;
                 } else {
                     tokens.push(ATok::Lt); i += 1;
                 }
             }
             '>' => {
-                if i + 1 < chars.len() && chars[i+1] == '=' {
-                    tokens.push(ATok::GtEq); i += 2;
+                if i + 2 < chars.len() && chars[i+1] == '>' && chars[i+2] == '=' {
+                    tokens.push(ATok::RShiftEq); i += 3;
                 } else if i + 1 < chars.len() && chars[i+1] == '>' {
                     tokens.push(ATok::RShift); i += 2;
+                } else if i + 1 < chars.len() && chars[i+1] == '=' {
+                    tokens.push(ATok::GtEq); i += 2;
                 } else {
                     tokens.push(ATok::Gt); i += 1;
                 }
@@ -190,11 +222,76 @@ fn arith_parse_expr(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> {
     if depth_exceeded {
         return Err("Arithmetic nesting too deep".to_string());
     }
-    let result = arith_parse_ternary(tokens, pos);
+    let result = arith_parse_assign(tokens, pos);
     ARITH_DEPTH.with(|d| {
         *d.borrow_mut() -= 1;
     });
     result
+}
+
+fn arith_var_read(name: &str) -> i64 {
+    let val = ARITH_VARS.with(|v| {
+        if let Some(map) = &*v.borrow() {
+            map.get(name).cloned().unwrap_or_default()
+        } else {
+            String::new()
+        }
+    });
+    val.trim().parse().unwrap_or(0)
+}
+
+fn arith_var_write(name: &str, value: i64) {
+    let val_str = value.to_string();
+    ARITH_VARS.with(|v| {
+        if let Some(map) = &mut *v.borrow_mut() {
+            map.insert(name.to_string(), val_str.clone());
+        }
+    });
+    push_param_assign(name.to_string(), val_str);
+}
+
+fn arith_apply_assign_op(name: &str, op: &ATok, rhs: i64) -> Result<i64, String> {
+    let cur = arith_var_read(name);
+    let new_val = match op {
+        ATok::Eq        => rhs,
+        ATok::PlusEq    => cur.wrapping_add(rhs),
+        ATok::MinusEq   => cur.wrapping_sub(rhs),
+        ATok::StarEq    => cur.wrapping_mul(rhs),
+        ATok::SlashEq   => { if rhs == 0 { return Err("division by zero".to_string()); } cur / rhs }
+        ATok::PercentEq => { if rhs == 0 { return Err("division by zero".to_string()); } cur % rhs }
+        ATok::AmpEq     => cur & rhs,
+        ATok::PipeEq    => cur | rhs,
+        ATok::CaretEq   => cur ^ rhs,
+        ATok::LShiftEq  => { let s = rhs.clamp(0, 63) as u32; cur << s }
+        ATok::RShiftEq  => { let s = rhs.clamp(0, 63) as u32; cur >> s }
+        _ => rhs,
+    };
+    arith_var_write(name, new_val);
+    Ok(new_val)
+}
+
+// Assignment operators: lowest precedence, right-associative, LHS must be a variable
+fn arith_parse_assign(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> {
+    if *pos < tokens.len() {
+        if let ATok::Var(name) = &tokens[*pos] {
+            if *pos + 1 < tokens.len() {
+                let is_assign_op = matches!(
+                    tokens[*pos + 1],
+                    ATok::Eq | ATok::PlusEq | ATok::MinusEq | ATok::StarEq |
+                    ATok::SlashEq | ATok::PercentEq | ATok::AmpEq | ATok::PipeEq |
+                    ATok::CaretEq | ATok::LShiftEq | ATok::RShiftEq
+                );
+                if is_assign_op {
+                    let name = name.clone();
+                    let op = tokens[*pos + 1].clone();
+                    *pos += 2;
+                    let rhs = arith_parse_assign(tokens, pos)?;
+                    return arith_apply_assign_op(&name, &op, rhs);
+                }
+            }
+        }
+    }
+    arith_parse_ternary(tokens, pos)
 }
 
 fn arith_parse_ternary(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> {
@@ -369,6 +466,32 @@ fn arith_parse_unary(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> {
             let v = arith_parse_unary(tokens, pos)?;
             Ok(if v == 0 { 1 } else { 0 })
         }
+        ATok::PlusPlus => {
+            *pos += 1;
+            if *pos < tokens.len() {
+                if let ATok::Var(name) = &tokens[*pos] {
+                    let name = name.clone();
+                    *pos += 1;
+                    let new_val = arith_var_read(&name).wrapping_add(1);
+                    arith_var_write(&name, new_val);
+                    return Ok(new_val);
+                }
+            }
+            Ok(0)
+        }
+        ATok::MinusMinus => {
+            *pos += 1;
+            if *pos < tokens.len() {
+                if let ATok::Var(name) = &tokens[*pos] {
+                    let name = name.clone();
+                    *pos += 1;
+                    let new_val = arith_var_read(&name).wrapping_sub(1);
+                    arith_var_write(&name, new_val);
+                    return Ok(new_val);
+                }
+            }
+            Ok(0)
+        }
         _ => arith_parse_primary(tokens, pos),
     }
 }
@@ -425,16 +548,19 @@ fn arith_parse_primary(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> 
         ATok::Var(name) => {
             let name = name.clone();
             *pos += 1;
-            // Look up variable from thread-local context
-            let val = ARITH_VARS.with(|v| {
-                if let Some(map) = &*v.borrow() {
-                    map.get(&name).cloned().unwrap_or_default()
-                } else {
-                    String::new()
-                }
-            });
-            let n: i64 = val.trim().parse().unwrap_or(0);
-            Ok(n)
+            let val = arith_var_read(&name);
+            // Post-increment/decrement: return old value, write new value
+            if *pos < tokens.len() && tokens[*pos] == ATok::PlusPlus {
+                *pos += 1;
+                arith_var_write(&name, val.wrapping_add(1));
+                return Ok(val);
+            }
+            if *pos < tokens.len() && tokens[*pos] == ATok::MinusMinus {
+                *pos += 1;
+                arith_var_write(&name, val.wrapping_sub(1));
+                return Ok(val);
+            }
+            Ok(val)
         }
         ATok::LParen => {
             *pos += 1;
@@ -450,6 +576,19 @@ fn arith_parse_primary(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> 
 
 // Expand a word token, returning list of strings (after word splitting + glob)
 pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore, script_file: &str) -> Vec<String> {
+    // Special case: "$@" or "${@}" inside double quotes should expand to multiple words
+    if quoted && (word == "\"$@\"" || word == "\"${@}\"") {
+        let count_str = vars.get_str("#").unwrap_or_else(|| "0".to_string());
+        let count: usize = count_str.parse().unwrap_or(0);
+        let mut result = Vec::new();
+        for idx in 1..=count {
+            if let Some(val) = vars.get_str(&idx.to_string()) {
+                result.push(val);
+            }
+        }
+        return result;
+    }
+
     let expanded = expand_word_no_split(word, quoted, vars, script_file);
 
     if quoted {
@@ -709,10 +848,45 @@ fn expand_dollar(chars: &[char], start: usize, vars: &crate::shell::vars::VarSto
             (result, consumed)
         }
         '@' | '*' => {
+            let ch = chars[i];
             i += 1;
-            // Expand positional parameters
-            let pos_params = vars.get_str("@").unwrap_or_default();
-            (pos_params, i - start)
+            // Get positional parameter count
+            let count_str = vars.get_str("#").unwrap_or_else(|| "0".to_string());
+            let count: usize = count_str.parse().unwrap_or(0);
+
+            if count == 0 {
+                (String::new(), i - start)
+            } else {
+                // Collect all positional parameters
+                let mut params = Vec::new();
+                for idx in 1..=count {
+                    if let Some(val) = vars.get_str(&idx.to_string()) {
+                        params.push(val);
+                    }
+                }
+
+                // Determine separator
+                let separator = if ch == '*' {
+                    // $* uses first char of IFS
+                    let ifs = vars.get_str("IFS").unwrap_or_else(|| " \t\n".to_string());
+                    if ifs.is_empty() {
+                        " ".to_string()
+                    } else {
+                        ifs.chars().next().unwrap().to_string()
+                    }
+                } else {
+                    // $@ also uses first char of IFS for now (basic fix)
+                    let ifs = vars.get_str("IFS").unwrap_or_else(|| " \t\n".to_string());
+                    if ifs.is_empty() {
+                        " ".to_string()
+                    } else {
+                        ifs.chars().next().unwrap().to_string()
+                    }
+                };
+
+                let result = params.join(&separator);
+                (result, i - start)
+            }
         }
         '#' => {
             i += 1;
@@ -1398,16 +1572,45 @@ fn read_until_close_paren(chars: &[char]) -> (String, usize) {
     let mut depth = 1;
     let mut i = 0;
     let mut body = String::new();
+    let mut word_buf = String::new();
+    let mut case_depth = 0;
+    let mut prev_keyword = String::new();
+
     while i < chars.len() {
         match chars[i] {
-            '(' => { depth += 1; body.push('('); }
+            '(' => {
+                depth += 1;
+                body.push('(');
+                word_buf.clear();
+            }
             ')' => {
-                depth -= 1;
-                if depth == 0 {
-                    i += 1;
-                    break;
+                // Before checking depth, handle pending keywords
+                if word_buf == "esac" && case_depth > 0 {
+                    case_depth -= 1;
+                    prev_keyword = "esac".to_string();
                 }
-                body.push(')');
+
+                // Check if this ) closes a case pattern instead of a paren
+                // A pattern close happens when: inside a case block, we have a word (or glob pattern), and we're expecting a pattern
+                // This includes: after 'in' keyword, after ';;', or after another pattern
+                let is_case_pattern_close = case_depth > 0 && !word_buf.is_empty() &&
+                    (prev_keyword == "in" || prev_keyword == ";;" || prev_keyword == "pattern");
+
+                if is_case_pattern_close {
+                    // This ) closes a case pattern, not the $(...)
+                    body.push(')');
+                    word_buf.clear();
+                    prev_keyword = "pattern".to_string();
+                } else {
+                    depth -= 1;
+                    if depth == 0 {
+                        i += 1;
+                        break;
+                    }
+                    body.push(')');
+                    word_buf.clear();
+                    prev_keyword.clear();
+                }
             }
             '\'' => {
                 body.push('\'');
@@ -1417,6 +1620,8 @@ fn read_until_close_paren(chars: &[char]) -> (String, usize) {
                     i += 1;
                 }
                 if i < chars.len() { body.push('\''); }
+                word_buf.clear();
+                prev_keyword.clear();
             }
             '"' => {
                 body.push('"');
@@ -1427,8 +1632,47 @@ fn read_until_close_paren(chars: &[char]) -> (String, usize) {
                     i += 1;
                 }
                 if i < chars.len() { body.push('"'); }
+                word_buf.clear();
+                prev_keyword.clear();
             }
-            c => { body.push(c); }
+            ';' => {
+                body.push(';');
+                if i + 1 < chars.len() && chars[i + 1] == ';' {
+                    i += 1;
+                    body.push(';');
+                    prev_keyword = ";;".to_string();
+                }
+                word_buf.clear();
+            }
+            c if c.is_whitespace() => {
+                body.push(c);
+                // Update prev_keyword based on word we just read
+                if word_buf == "case" {
+                    case_depth += 1;
+                    prev_keyword = "case".to_string();
+                } else if word_buf == "in" {
+                    prev_keyword = "in".to_string();
+                } else if word_buf == "esac" && case_depth > 0 {
+                    case_depth -= 1;
+                    prev_keyword = "esac".to_string();
+                } else if !word_buf.is_empty() {
+                    if prev_keyword == "in" || prev_keyword == ";;" || prev_keyword == "pattern" {
+                        prev_keyword = "pattern".to_string();
+                    } else {
+                        prev_keyword.clear();
+                    }
+                }
+                word_buf.clear();
+            }
+            c if c.is_alphanumeric() || c == '_' || c == '*' || c == '?' || c == '[' => {
+                word_buf.push(c);
+                body.push(c);
+            }
+            c => {
+                body.push(c);
+                word_buf.clear();
+                prev_keyword.clear();
+            }
         }
         i += 1;
     }

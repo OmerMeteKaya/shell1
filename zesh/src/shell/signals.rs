@@ -6,6 +6,8 @@ use std::sync::Mutex;
 pub static G_SIGINT_RECEIVED: AtomicBool = AtomicBool::new(false);
 pub static G_INTERRUPT_LOOP: AtomicBool = AtomicBool::new(false);
 pub static G_FOREGROUND_PID: AtomicI32 = AtomicI32::new(-1);
+pub static G_EXIT_TRAP_RUNNING: AtomicBool = AtomicBool::new(false);
+pub static G_PENDING_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
 
 // Trap actions: index = signal number
 pub static G_TRAP_ACTIONS: Mutex<[Option<String>; 32]> = Mutex::new([
@@ -84,5 +86,6 @@ pub fn run_exit_trap(action: &str, vars: &crate::shell::vars::VarStore, script_f
     let nodes = crate::shell::parser::parse(tokens);
     let mut ctx = crate::shell::executor::ExecContext::new_subshell();
     ctx.script_file = script_file.to_string();
+    ctx.exit_status = G_PENDING_EXIT_STATUS.load(Ordering::SeqCst);
     crate::shell::executor::execute_list_with_vars(&nodes, &mut ctx, vars);
 }

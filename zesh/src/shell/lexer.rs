@@ -323,17 +323,46 @@ impl Lexer {
     fn read_paren_body(&mut self) -> String {
         let mut s = String::new();
         let mut depth = 1;
+        let mut case_depth = 0;  // Track how many case...esac blocks we're in
+        let mut word_buf = String::new();
+        let mut prev_keyword = String::new();  // Track the last keyword seen
+
         loop {
             match self.peek() {
                 None => break,
-                Some('(') => { depth += 1; s.push(self.advance().unwrap()); }
-                Some(')') => {
-                    depth -= 1;
-                    if depth == 0 {
-                        self.advance(); // consume )
-                        break;
-                    }
+                Some('(') => {
+                    depth += 1;
                     s.push(self.advance().unwrap());
+                    word_buf.clear();
+                }
+                Some(')') => {
+                    // First, handle pending keywords that haven't been processed yet
+                    if word_buf == "esac" && case_depth > 0 {
+                        case_depth -= 1;
+                        prev_keyword = "esac".to_string();
+                    }
+
+                    // A bare ) in a case block closes a pattern, not a paren
+                    // This happens when: case_depth > 0 AND we just read a word AND we're in a pattern context
+                    let is_case_pattern_close = case_depth > 0 && !word_buf.is_empty() &&
+                        (prev_keyword == "in" || prev_keyword == ";;" || prev_keyword == "pattern");
+
+                    if is_case_pattern_close {
+                        // This ) closes a case pattern, not the $(...) substitution
+                        s.push(self.advance().unwrap());
+                        word_buf.clear();
+                        prev_keyword = "pattern".to_string();  // Mark that we just closed a pattern
+                    } else {
+                        // This ) closes the substitution or a nested paren
+                        depth -= 1;
+                        if depth == 0 {
+                            self.advance(); // consume )
+                            break;
+                        }
+                        s.push(self.advance().unwrap());
+                        word_buf.clear();
+                        prev_keyword.clear();
+                    }
                 }
                 Some('\'') => {
                     s.push(self.advance().unwrap());
@@ -343,6 +372,8 @@ impl Lexer {
                             Some(c) => s.push(c),
                         }
                     }
+                    word_buf.clear();
+                    prev_keyword.clear();
                 }
                 Some('"') => {
                     s.push(self.advance().unwrap());
@@ -353,12 +384,54 @@ impl Lexer {
                             Some(c) => s.push(c),
                         }
                     }
+                    word_buf.clear();
+                    prev_keyword.clear();
                 }
                 Some('\\') => {
                     s.push(self.advance().unwrap());
                     if let Some(c) = self.advance() { s.push(c); }
+                    word_buf.clear();
+                    prev_keyword.clear();
                 }
-                Some(_) => { s.push(self.advance().unwrap()); }
+                Some(';') => {
+                    s.push(self.advance().unwrap());
+                    if self.peek() == Some(';') {
+                        s.push(self.advance().unwrap());
+                        // After ;;, expect next pattern
+                        prev_keyword = ";;".to_string();
+                    }
+                    word_buf.clear();
+                }
+                Some(c) if c.is_whitespace() => {
+                    s.push(self.advance().unwrap());
+                    // Update prev_keyword based on the word we just read
+                    if word_buf == "case" {
+                        case_depth += 1;
+                        prev_keyword = "case".to_string();
+                    } else if word_buf == "in" {
+                        prev_keyword = "in".to_string();
+                    } else if word_buf == "esac" && case_depth > 0 {
+                        case_depth -= 1;
+                        prev_keyword = "esac".to_string();
+                    } else if !word_buf.is_empty() {
+                        // Any other word - might be a pattern or regular word
+                        if prev_keyword == "in" || prev_keyword == ";;" || prev_keyword == "pattern" {
+                            prev_keyword = "pattern".to_string();
+                        } else {
+                            prev_keyword.clear();
+                        }
+                    }
+                    word_buf.clear();
+                }
+                Some(c) if c.is_alphanumeric() || c == '_' || c == '*' || c == '?' || c == '[' => {
+                    word_buf.push(c);
+                    s.push(self.advance().unwrap());
+                }
+                Some(c) => {
+                    s.push(self.advance().unwrap());
+                    word_buf.clear();
+                    prev_keyword.clear();
+                }
             }
         }
         s

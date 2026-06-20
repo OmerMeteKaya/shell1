@@ -337,11 +337,18 @@ pub fn builtin_exit(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore)
         ctx.exit_status
     };
 
-    // Run EXIT trap
-    if let Ok(trap) = crate::shell::signals::G_TRAP_EXIT.lock() {
-        if let Some(action) = trap.clone() {
-            drop(trap);
-            crate::shell::signals::run_exit_trap(&action, vars, &ctx.script_file);
+    // Run EXIT trap only if not already running
+    let already_running = crate::shell::signals::G_EXIT_TRAP_RUNNING
+        .swap(true, std::sync::atomic::Ordering::SeqCst);
+
+    if !already_running {
+        crate::shell::signals::G_PENDING_EXIT_STATUS
+            .store(code, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(trap) = crate::shell::signals::G_TRAP_EXIT.lock() {
+            if let Some(action) = trap.clone() {
+                drop(trap);
+                crate::shell::signals::run_exit_trap(&action, vars, &ctx.script_file);
+            }
         }
     }
 
