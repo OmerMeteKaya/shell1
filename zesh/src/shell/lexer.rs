@@ -326,10 +326,28 @@ impl Lexer {
         let mut case_depth = 0;  // Track how many case...esac blocks we're in
         let mut word_buf = String::new();
         let mut prev_keyword = String::new();  // Track the last keyword seen
+        let mut bracket_depth = 0;  // Track bracket expression [...] nesting
 
         loop {
             match self.peek() {
                 None => break,
+                Some('[') if bracket_depth == 0 => {
+                    // Starting a bracket expression
+                    bracket_depth += 1;
+                    word_buf.push('[');
+                    s.push(self.advance().unwrap());
+                }
+                Some(']') if bracket_depth > 0 => {
+                    // Ending a bracket expression
+                    bracket_depth -= 1;
+                    word_buf.push(']');
+                    s.push(self.advance().unwrap());
+                }
+                Some(c) if bracket_depth > 0 => {
+                    // Inside bracket expression, treat all chars as part of word
+                    word_buf.push(c);
+                    s.push(self.advance().unwrap());
+                }
                 Some('(') => {
                     depth += 1;
                     s.push(self.advance().unwrap());
@@ -423,7 +441,7 @@ impl Lexer {
                     }
                     word_buf.clear();
                 }
-                Some(c) if c.is_alphanumeric() || c == '_' || c == '*' || c == '?' || c == '[' => {
+                Some(c) if c.is_alphanumeric() || c == '_' || c == '*' || c == '?' => {
                     word_buf.push(c);
                     s.push(self.advance().unwrap());
                 }
@@ -488,10 +506,28 @@ impl Lexer {
         let mut quoted = false;
         // Track if we're inside a \${...} sequence (literal braces after escaped $)
         let mut in_escaped_brace = false;
+        let mut bracket_depth = 0;  // Track bracket expression [...] nesting
 
         loop {
             match self.peek() {
                 None => break,
+                Some('[') if bracket_depth == 0 => {
+                    // Starting a bracket expression
+                    bracket_depth += 1;
+                    value.push('[');
+                    self.advance();
+                }
+                Some(']') if bracket_depth > 0 => {
+                    // Ending a bracket expression
+                    bracket_depth -= 1;
+                    value.push(']');
+                    self.advance();
+                }
+                Some(c) if bracket_depth > 0 => {
+                    // Inside bracket expression, all chars are literal (don't break on whitespace)
+                    value.push(c);
+                    self.advance();
+                }
                 Some(c) if is_word_break(c) => {
                     // Don't stop at { if preceded by \$ (escaped dollar sign)
                     if c == '{' && value.ends_with("\\$") {

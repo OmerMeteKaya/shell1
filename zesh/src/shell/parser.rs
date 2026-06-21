@@ -327,6 +327,10 @@ impl Parser {
                 n.negate = true;
                 Some(n)
             }
+            _ if is_redir_tok(self.peek_kind()) => {
+                // Simple command starting with a redirection (e.g. "9>&2 echo hello")
+                self.parse_simple_command()
+            }
             _ => None,
         }
     }
@@ -1169,6 +1173,15 @@ fn is_keyword_tok(k: &TokKind) -> bool {
         TokKind::While | TokKind::Until | TokKind::Do | TokKind::Done |
         TokKind::For | TokKind::In | TokKind::Case | TokKind::Esac |
         TokKind::Select | TokKind::Function | TokKind::Time | TokKind::Coproc
+    )
+}
+
+fn is_redir_tok(k: &TokKind) -> bool {
+    matches!(k,
+        TokKind::RedirIn | TokKind::RedirOut | TokKind::RedirAppend |
+        TokKind::RedirHeredoc | TokKind::RedirHerestr |
+        TokKind::RedirFdOut | TokKind::RedirFdIn | TokKind::RedirFdAppend |
+        TokKind::RedirDupOut | TokKind::RedirDupIn
     )
 }
 

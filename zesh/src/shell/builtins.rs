@@ -751,8 +751,9 @@ pub fn builtin_source(args: &[String], ctx: &mut ExecContext, vars: &mut VarStor
         return 1;
     }
     let path = &args[0];
-    match std::fs::read_to_string(path) {
-        Ok(content) => {
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            let content = String::from_utf8_lossy(&bytes).into_owned();
             crate::shell::executor::run_script(&content, path, ctx, vars)
         }
         Err(e) => {

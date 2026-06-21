@@ -111,15 +111,23 @@ pub fn execute_list(nodes: &[CmdNode], ctx: &mut ExecContext, vars: &mut VarStor
         match &node.op {
             NodeOp::And => {
                 if status != 0 {
-                    // Short circuit: skip next
-                    i += 2;
+                    // Short-circuit: skip remaining nodes in this &&/|| chain
+                    i += 1;
+                    while i < nodes.len() && matches!(nodes[i].op, NodeOp::And | NodeOp::Or) {
+                        i += 1;
+                    }
+                    i += 1; // skip the final End/Semi chain node
                     continue;
                 }
             }
             NodeOp::Or => {
                 if status == 0 {
-                    // Skip next
-                    i += 2;
+                    // Short-circuit: skip remaining nodes in this &&/|| chain
+                    i += 1;
+                    while i < nodes.len() && matches!(nodes[i].op, NodeOp::And | NodeOp::Or) {
+                        i += 1;
+                    }
+                    i += 1; // skip the final End/Semi chain node
                     continue;
                 }
             }

@@ -21,7 +21,6 @@ fn main() {
     vars.set_raw("$", std::process::id().to_string(), 0);
     vars.set_raw("0", args[0].clone(), 0);
     vars.set_raw("BASH_SOURCE", args[0].clone(), 0);
-    vars.set_raw("BASH_VERSION", "5.2.0(1)-release".to_string(), 0);
     vars.set_raw("SECONDS", "0".to_string(), 0);
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
     vars.set_raw("HOME", home, 0);
@@ -98,13 +97,14 @@ fn main() {
         ctx.script_file = script_file.clone();
         ctx.pos_params = args[arg_idx + 1..].to_vec();
 
-        let content = match std::fs::read_to_string(&script_file) {
-            Ok(c) => c,
+        let bytes = match std::fs::read(&script_file) {
+            Ok(b) => b,
             Err(e) => {
                 eprintln!("zesh: {}: {}", script_file, e);
                 std::process::exit(1);
             }
         };
+        let content = String::from_utf8_lossy(&bytes).into_owned();
 
         if no_execute {
             // Parse only, don't execute
