@@ -277,7 +277,9 @@ fn apply_one_redir_save(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSt
     if saved_fd >= 0 {
         Some(SavedFd { orig_fd: src_fd, saved_fd })
     } else {
-        None
+        // src_fd was not open before; redirect succeeded but there's no prior fd to dup back.
+        // Use saved_fd = -1 as a sentinel: restore_redirections will close orig_fd instead of dup2.
+        Some(SavedFd { orig_fd: src_fd, saved_fd: -1 })
     }
 }
 
@@ -406,8 +408,13 @@ fn restore_redirections(saved: Vec<SavedFd>) {
     for s in saved.into_iter().rev() {
         // SAFETY: dup2 and close with valid fds
         unsafe {
-            libc::dup2(s.saved_fd, s.orig_fd);
-            libc::close(s.saved_fd);
+            if s.saved_fd >= 0 {
+                libc::dup2(s.saved_fd, s.orig_fd);
+                libc::close(s.saved_fd);
+            } else {
+                // saved_fd == -1: orig_fd didn't exist before the redirect; close it to restore that state.
+                libc::close(s.orig_fd);
+            }
         }
     }
 }
@@ -1151,10 +1158,23 @@ fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut 
 
     let c_path = std::ffi::CString::new(exe_path.as_str()).unwrap_or_default();
 
-    // SAFETY: execve with valid C string pointers
+    // SAFETY: execve with valid C string pointers; all CStrings outlive the call
     unsafe { libc::execve(c_path.as_ptr(), c_argv.as_ptr(), c_envp.as_ptr()); }
 
-    // execve failed
+    // ENOEXEC means the file is a script without a shebang; fall back to /bin/sh
+    if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOEXEC) {
+        let sh = std::ffi::CString::new("/bin/sh").unwrap();
+        let sh0 = std::ffi::CString::new("sh").unwrap();
+        let mut sh_args: Vec<std::ffi::CString> = vec![
+            sh0,
+            std::ffi::CString::new(exe_path.as_str()).unwrap_or_default(),
+        ];
+        sh_args.extend(argv.iter().skip(1).map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default()));
+        let mut sh_argv: Vec<*const libc::c_char> = sh_args.iter().map(|s| s.as_ptr()).collect();
+        sh_argv.push(std::ptr::null());
+        unsafe { libc::execve(sh.as_ptr(), sh_argv.as_ptr(), c_envp.as_ptr()); }
+    }
+
     eprintln!("zesh: {}: {}", cmd, std::io::Error::last_os_error());
 }
 
@@ -1252,7 +1272,11 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
         let mut c_argv: Vec<*const libc::c_char> = c_args.iter().map(|s| s.as_ptr()).collect();
         c_argv.push(std::ptr::null());
 
-        let env_map: HashMap<String, String> = std::env::vars().collect();
+        let mut env_map: HashMap<String, String> = std::env::vars().collect();
+        // Add exported shell variables
+        for (k, v) in vars.all_exported() {
+            env_map.insert(k, v);
+        }
         let c_envs: Vec<std::ffi::CString> = env_map.iter()
             .map(|(k, v)| std::ffi::CString::new(format!("{}={}", k, v)).unwrap_or_default())
             .collect();
@@ -1260,8 +1284,23 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
         c_envp.push(std::ptr::null());
 
         let c_path = std::ffi::CString::new(exe_path.as_str()).unwrap_or_default();
-        // SAFETY: execve with valid C string pointers
+        // SAFETY: execve with valid C string pointers; all CStrings outlive the call
         unsafe { libc::execve(c_path.as_ptr(), c_argv.as_ptr(), c_envp.as_ptr()); }
+
+        // ENOEXEC means the file is a script without a shebang; fall back to /bin/sh
+        if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOEXEC) {
+            let sh = std::ffi::CString::new("/bin/sh").unwrap();
+            let sh0 = std::ffi::CString::new("sh").unwrap();
+            let mut sh_args: Vec<std::ffi::CString> = vec![
+                sh0,
+                std::ffi::CString::new(exe_path.as_str()).unwrap_or_default(),
+            ];
+            sh_args.extend(exe_args.iter().skip(1).map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default()));
+            let mut sh_argv: Vec<*const libc::c_char> = sh_args.iter().map(|s| s.as_ptr()).collect();
+            sh_argv.push(std::ptr::null());
+            unsafe { libc::execve(sh.as_ptr(), sh_argv.as_ptr(), c_envp.as_ptr()); }
+        }
+
         eprintln!("zesh: exec: {}: {}", exe, std::io::Error::last_os_error());
         return 127;
     }

@@ -8,11 +8,12 @@ pub struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     depth: usize,
+    pub parse_error: Option<String>,
 }
 
 impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
-        Parser { tokens, pos: 0, depth: 0 }
+        Parser { tokens, pos: 0, depth: 0, parse_error: None }
     }
 
     fn peek(&self) -> &Token {
@@ -269,10 +270,7 @@ impl Parser {
                 self.advance();
                 self.skip_newlines();
                 let body = self.parse_list();
-                // Consume )
-                if self.peek_kind() == &TokKind::RParen {
-                    self.advance();
-                }
+                self.must_consume(TokKind::RParen, "in subshell");
                 let redirs = self.parse_redirs();
                 Some(CmdNode {
                     kind: CompoundKind::Subshell(body),
@@ -287,9 +285,7 @@ impl Parser {
                 self.advance();
                 self.skip_newlines();
                 let body = self.parse_list();
-                if self.peek_kind() == &TokKind::RBrace {
-                    self.advance();
-                }
+                self.must_consume(TokKind::RBrace, "in brace group");
                 let redirs = self.parse_redirs();
                 Some(CmdNode {
                     kind: CompoundKind::Brace(body),
@@ -434,7 +430,7 @@ impl Parser {
                 _ => break,
             }
         }
-        self.skip_consume(TokKind::Fi);
+        self.must_consume(TokKind::Fi, "after if statement");
         let redirs = self.parse_redirs();
 
         Some(CmdNode {
@@ -462,10 +458,10 @@ impl Parser {
         self.advance(); // while
         self.skip_newlines();
         let cond = self.parse_compound_list_until(&[TokKind::Do]);
-        self.skip_consume(TokKind::Do);
+        self.must_consume(TokKind::Do, "in while statement");
         self.skip_newlines();
         let body = self.parse_compound_list_until(&[TokKind::Done]);
-        self.skip_consume(TokKind::Done);
+        self.must_consume(TokKind::Done, "in while statement");
         let redirs = self.parse_redirs();
         Some(CmdNode {
             kind: CompoundKind::While { cond, body },
@@ -492,10 +488,10 @@ impl Parser {
         self.advance(); // until
         self.skip_newlines();
         let cond = self.parse_compound_list_until(&[TokKind::Do]);
-        self.skip_consume(TokKind::Do);
+        self.must_consume(TokKind::Do, "in until statement");
         self.skip_newlines();
         let body = self.parse_compound_list_until(&[TokKind::Done]);
-        self.skip_consume(TokKind::Done);
+        self.must_consume(TokKind::Done, "in until statement");
         let redirs = self.parse_redirs();
         Some(CmdNode {
             kind: CompoundKind::Until { cond, body },
@@ -538,10 +534,10 @@ impl Parser {
         while matches!(self.peek_kind(), TokKind::Semi | TokKind::Newline) {
             self.advance();
         }
-        self.skip_consume(TokKind::Do);
+        self.must_consume(TokKind::Do, "in for statement");
         self.skip_newlines();
         let body = self.parse_compound_list_until(&[TokKind::Done]);
-        self.skip_consume(TokKind::Done);
+        self.must_consume(TokKind::Done, "in for statement");
         let redirs = self.parse_redirs();
 
         Some(CmdNode {
@@ -612,7 +608,7 @@ impl Parser {
             }
             self.skip_newlines();
         }
-        self.skip_consume(TokKind::Esac);
+        self.must_consume(TokKind::Esac, "in case statement");
         let redirs = self.parse_redirs();
 
         Some(CmdNode {
@@ -692,10 +688,10 @@ impl Parser {
         while matches!(self.peek_kind(), TokKind::Semi | TokKind::Newline) {
             self.advance();
         }
-        self.skip_consume(TokKind::Do);
+        self.must_consume(TokKind::Do, "in select statement");
         self.skip_newlines();
         let body = self.parse_compound_list_until(&[TokKind::Done]);
-        self.skip_consume(TokKind::Done);
+        self.must_consume(TokKind::Done, "in select statement");
         let redirs = self.parse_redirs();
 
         Some(CmdNode {
@@ -1124,6 +1120,27 @@ impl Parser {
             self.advance();
         }
     }
+
+    fn must_consume(&mut self, kind: TokKind, context: &str) {
+        if self.peek_kind() == &kind {
+            self.advance();
+        } else if self.parse_error.is_none() {
+            self.parse_error = Some(format!("syntax error: expected '{}' {}", Self::token_name(&kind), context));
+        }
+    }
+
+    fn token_name(kind: &TokKind) -> &'static str {
+        match kind {
+            TokKind::Fi => "fi",
+            TokKind::Done => "done",
+            TokKind::Then => "then",
+            TokKind::Elif => "elif",
+            TokKind::Else => "else",
+            TokKind::RParen => ")",
+            TokKind::RBrace => "}",
+            _ => "token",
+        }
+    }
 }
 
 fn parse_dup(val: &str, _is_input: bool) -> (i32, i32) {
@@ -1172,4 +1189,10 @@ fn is_assignment(s: &str) -> bool {
 pub fn parse(tokens: Vec<Token>) -> Vec<CmdNode> {
     let mut parser = Parser::new(tokens);
     parser.parse_list()
+}
+
+pub fn parse_with_error_check(tokens: Vec<Token>) -> (Vec<CmdNode>, Option<String>) {
+    let mut parser = Parser::new(tokens);
+    let nodes = parser.parse_list();
+    (nodes, parser.parse_error)
 }

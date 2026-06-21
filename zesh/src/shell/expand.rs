@@ -1044,11 +1044,13 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         return val.len().to_string();
     }
 
-    // ${VAR@transform} — only when @ is not inside [...]
+    // ${VAR@transform} — only when @ is not inside [...] and not part of $@ and not a special parameter
     if let Some(at_pos) = content.rfind('@') {
         let before = &content[..at_pos];
         // Skip if @ is inside brackets (e.g. ${ARR[@]})
-        if !before.ends_with('[') {
+        // Skip if @ is preceded by $ (e.g. ${1+$@} - here @ is part of $@, not a transform)
+        // Skip if @ itself is the variable name (e.g. ${@+yes} - here @ is the special param)
+        if !before.ends_with('[') && !before.ends_with('$') && !before.is_empty() {
             let transform = &content[at_pos+1..];
             let val = get_var_value(before, vars, script_file);
             return match transform {
@@ -1138,7 +1140,11 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         for (idx, c) in content.char_indices() {
             if matches!(c, '-' | '=' | '+' | '?') {
                 let name = &content[..idx];
-                if is_valid_var_name(name) {
+                let is_valid_name = is_valid_var_name(name) ||
+                                    name.parse::<usize>().is_ok() ||  // numeric positional parameter
+                                    name == "@" || name == "*" ||      // special parameters
+                                    name == "#";                        // parameter count
+                if is_valid_name {
                     let rest = &content[idx..];
                     return expand_default_param_no_colon(name, rest, vars, script_file);
                 }
@@ -1234,6 +1240,31 @@ fn find_colon_outside_parens(s: &str) -> Option<usize> {
     None
 }
 
+fn param_is_set(name: &str, vars: &crate::shell::vars::VarStore) -> bool {
+    // Check if a parameter is set
+    // For numeric positional parameters: check if index <= # count
+    // For @ or *: check if # > 0
+    // For named variables: check if it exists
+    match name {
+        "@" | "*" => {
+            let count_str = vars.get_str("#").unwrap_or_else(|| "0".to_string());
+            count_str.parse::<usize>().unwrap_or(0) > 0
+        }
+        _ => {
+            // Check if it's a numeric positional parameter
+            if let Ok(idx) = name.parse::<usize>() {
+                if idx > 0 {
+                    let count_str = vars.get_str("#").unwrap_or_else(|| "0".to_string());
+                    let count = count_str.parse::<usize>().unwrap_or(0);
+                    return idx <= count;
+                }
+            }
+            // Named variable
+            vars.get_str(name).is_some()
+        }
+    }
+}
+
 fn expand_default_param(name: &str, rest: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> String {
     // rest is the part after the colon: "-word", "=word", "+word", "?word"
     // OR it could be ":-word" if passed with the colon (legacy calling convention)
@@ -1249,7 +1280,8 @@ fn expand_default_param(name: &str, rest: &str, vars: &crate::shell::vars::VarSt
     };
 
     let val = get_var_value(name, vars, script_file);
-    let is_unset_or_null = val.is_empty();
+    let is_set = param_is_set(name, vars);
+    let is_unset_or_null = !is_set || val.is_empty();
 
     match op_char {
         "-" => {
@@ -1293,22 +1325,25 @@ fn expand_default_param(name: &str, rest: &str, vars: &crate::shell::vars::VarSt
 
 fn expand_default_param_no_colon(name: &str, rest: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> String {
     let (op_char, word) = (&rest[..1], &rest[1..]);
-    let val = vars.get_str(name);
-    let is_unset = val.is_none();
+    let is_set = param_is_set(name, vars);
+    let val = get_var_value(name, vars, script_file);
+    let is_unset = !is_set;
 
     match op_char {
         "-" => {
             if is_unset {
                 expand_string(word, vars, script_file)
             } else {
-                val.unwrap_or_default()
+                val
             }
         }
         "=" => {
             if is_unset {
-                expand_string(word, vars, script_file)
+                let new_val = expand_string(word, vars, script_file);
+                push_param_assign(name.to_string(), new_val.clone());
+                new_val
             } else {
-                val.unwrap_or_default()
+                val
             }
         }
         "+" => {
@@ -1322,12 +1357,13 @@ fn expand_default_param_no_colon(name: &str, rest: &str, vars: &crate::shell::va
             if is_unset {
                 let msg = expand_string(word, vars, script_file);
                 eprintln!("zesh: {}: {}", name, msg);
+                PARAM_ERROR.with(|e| *e.borrow_mut() = true);
                 String::new()
             } else {
-                val.unwrap_or_default()
+                val
             }
         }
-        _ => val.unwrap_or_default(),
+        _ => val,
     }
 }
 
@@ -1791,6 +1827,33 @@ fn expand_vars_in_arith(expr: &str, vars: &crate::shell::vars::VarStore) -> Stri
                 } else {
                     result.push('$');
                 }
+            } else if i < chars.len() && chars[i].is_ascii_digit() {
+                // Positional parameter: $1, $2, ..., $N
+                let mut name = String::new();
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    name.push(chars[i]);
+                    i += 1;
+                }
+                let val = vars.get_str(&name).unwrap_or_default();
+                let n: i64 = val.trim().parse().unwrap_or(0);
+                result.push_str(&n.to_string());
+            } else if i < chars.len() && (chars[i] == '*' || chars[i] == '@') {
+                // $* and $@ — expand to space-joined positional params (raw, may be an expression)
+                i += 1;
+                let count_str = vars.get_str("#").unwrap_or_else(|| "0".to_string());
+                let count: usize = count_str.parse().unwrap_or(0);
+                let mut params = Vec::new();
+                for idx in 1..=count {
+                    params.push(vars.get_str(&idx.to_string()).unwrap_or_default());
+                }
+                result.push_str(&params.join(" "));
+            } else if i < chars.len() && matches!(chars[i], '#' | '?' | '$' | '!') {
+                // Special single-char variables
+                let name = chars[i].to_string();
+                i += 1;
+                let val = vars.get_str(&name).unwrap_or_default();
+                let n: i64 = val.trim().parse().unwrap_or(0);
+                result.push_str(&n.to_string());
             } else if i < chars.len() && (chars[i].is_alphabetic() || chars[i] == '_') {
                 let mut name = String::new();
                 while i < chars.len() && (chars[i].is_alphanumeric() || chars[i] == '_') {
