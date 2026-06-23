@@ -691,15 +691,35 @@ pub fn builtin_read(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, 
             if var_names.len() == 1 {
                 vars.set(&var_names[0], line);
             } else {
-                // Split on IFS
-                let parts = split_ifs(&line, &ifs);
+                // Split on IFS, tracking positions for remainder field
+                let (parts, positions) = split_ifs_with_positions(&line, &ifs);
                 for (idx, name) in var_names.iter().enumerate() {
-                    if idx < parts.len() - 1 {
-                        vars.set(name, parts[idx].clone());
-                    } else if idx == var_names.len() - 1 {
-                        // Last var gets rest
-                        vars.set(name, parts[idx..].join(&ifs.chars().next().map(|c| c.to_string()).unwrap_or_default()));
+                    if idx < parts.len() {
+                        if idx == var_names.len() - 1 {
+                            // Last var gets remainder from its start position to end, with trailing IFS stripped
+                            let start_pos = positions[idx];
+                            let mut end_pos = line.len();
+                            // Strip trailing IFS whitespace
+                            while end_pos > start_pos {
+                                let byte_idx = end_pos - 1;
+                                if let Some(c) = line.chars().rev().next() {
+                                    if ifs.contains(c) {
+                                        end_pos = byte_idx;
+                                        line.pop();
+                                    } else {
+                                        break;
+                                    }
+                                } else {
+                                    break;
+                                }
+                            }
+                            vars.set(name, line[start_pos..].to_string());
+                        } else {
+                            // Non-last vars get their field value
+                            vars.set(name, parts[idx].clone());
+                        }
                     } else {
+                        // Ran out of fields
                         vars.set(name, String::new());
                     }
                 }
@@ -737,24 +757,85 @@ fn read_line_from_fd(fd: i32, delim: char) -> Option<String> {
     Some(String::from_utf8_lossy(&result).into_owned())
 }
 
-fn split_ifs(s: &str, ifs: &str) -> Vec<String> {
-    if ifs.is_empty() {
-        return vec![s.to_string()];
-    }
-    let ifs_chars: Vec<char> = ifs.chars().collect();
-    let mut parts = Vec::new();
-    let mut current = String::new();
+fn split_ifs_with_positions(s: &str, ifs: &str) -> (Vec<String>, Vec<usize>) {
+    // Returns (fields, start_positions) where start_positions[i] is the byte offset
+    // in the original string where field i starts. For the remainder field (last one),
+    // the position indicates where to start taking from in the original string.
 
-    for c in s.chars() {
-        if ifs_chars.contains(&c) {
-            parts.push(current.clone());
-            current.clear();
-        } else {
-            current.push(c);
-        }
+    if ifs.is_empty() {
+        return (vec![s.to_string()], vec![0]);
     }
-    parts.push(current);
-    parts
+
+    let ifs_chars: Vec<char> = ifs.chars().collect();
+
+    // Check if IFS contains only whitespace (space, tab, newline)
+    let has_non_whitespace_ifs = ifs_chars.iter().any(|c| !c.is_whitespace());
+    let is_default_ifs = ifs == " \t\n";
+    let has_whitespace_ifs = ifs_chars.iter().any(|c| c.is_whitespace());
+
+    // Case 1: Default IFS (space, tab, newline) — squeeze consecutive whitespace
+    if is_default_ifs || (has_whitespace_ifs && !has_non_whitespace_ifs) {
+        let mut parts = Vec::new();
+        let mut positions = Vec::new();
+        let mut current = String::new();
+        let mut field_start: usize = 0;
+        let mut in_whitespace = true;
+        let mut byte_pos = 0;
+
+        for c in s.chars() {
+            let char_len = c.len_utf8();
+            if c.is_whitespace() {
+                if !current.is_empty() {
+                    parts.push(current.clone());
+                    positions.push(field_start);
+                    current.clear();
+                }
+                in_whitespace = true;
+            } else {
+                if in_whitespace {
+                    field_start = byte_pos;
+                    in_whitespace = false;
+                }
+                current.push(c);
+            }
+            byte_pos += char_len;
+        }
+
+        if !current.is_empty() {
+            parts.push(current);
+            positions.push(field_start);
+        }
+
+        // Return at least an empty string if nothing matched
+        if parts.is_empty() {
+            parts.push(String::new());
+            positions.push(0);
+        }
+        (parts, positions)
+    } else {
+        // Case 2: Non-whitespace or mixed IFS — don't squeeze, preserve empty fields
+        let mut parts = Vec::new();
+        let mut positions = Vec::new();
+        let mut current = String::new();
+        let mut field_start: usize = 0;
+        let mut byte_pos = 0;
+
+        for c in s.chars() {
+            let char_len = c.len_utf8();
+            if ifs_chars.contains(&c) {
+                positions.push(field_start);
+                parts.push(current.clone());
+                current.clear();
+                field_start = byte_pos + char_len;
+            } else {
+                current.push(c);
+            }
+            byte_pos += char_len;
+        }
+        positions.push(field_start);
+        parts.push(current);
+        (parts, positions)
+    }
 }
 
 pub fn builtin_source(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
