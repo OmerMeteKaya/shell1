@@ -1,0 +1,5 @@
+libgreputils_a-c-ctype.o: ../../../lib/c-ctype.c \
+ /usr/include/stdc-predef.h ../config.h ../../../lib/c-ctype.h
+/usr/include/stdc-predef.h:
+../config.h:
+../../../lib/c-ctype.h:

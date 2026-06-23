@@ -1,0 +1,11 @@
+This is pdfTeX, Version 3.141592653-2.6-1.40.29 (TeX Live 2026/Arch Linux) (preloaded format=etex)
+ restricted \write18 enabled.
+entering extended mode
+(./txiversion.tex
+(/home/mete/shell/testsuites/grep-3.11/grep-3.11/build-aux/texinfo.tex
+Loading texinfo [version 2023-03-27.21]: pdf, fonts, glyphs, page headings,
+tables, conditionals, indexing, sectioning, toc, environments, defuns, macros,
+cross references, insertions, localization, formatting, microtype,
+and turning on texinfo input format.) [1] )
+Output written on txiversion.dvi (1 page, 224 bytes).
+Transcript written on txiversion.log.

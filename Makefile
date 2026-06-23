@@ -1,6 +1,6 @@
 CARGO        = cargo
-RELEASE_BIN  = zesh/target/release/zesh_rs
-DEBUG_BIN    = zesh/target/debug/zesh_rs
+RELEASE_BIN  = zesh/target/release/zesh
+DEBUG_BIN    = zesh/target/debug/zesh
 FUZZ_DIR     = zesh/fuzz
 CORPUS_DIR   = fuzz/corpus
 FINDINGS_DIR = fuzz/findings/rust

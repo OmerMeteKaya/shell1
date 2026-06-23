@@ -1,0 +1,15 @@
+make  dist-xz dist-gzip am__post_remove_distdir='@:'
+make[1]: Entering directory '/home/mete/shell/testsuites/grep-3.11'
+make  distdir-am
+make[2]: Entering directory '/home/mete/shell/testsuites/grep-3.11'
+if test -d "grep-3.11"; then find "grep-3.11" -type d ! -perm -200 -exec chmod u+w {} ';' && rm -rf "grep-3.11" || { sleep 5 && rm -rf "grep-3.11"; }; else :; fi
+zesh: -e: No such file or directory (os error 2)
+sed: -e expression #1, char 3: unknown command: '/'
+mkdir: missing operand
+Try '/usr/bin/mkdir --help' for more information.
+cp: cannot create regular file 'grep-3.11/m4/00gnulib.m4': No such file or directory
+make[2]: *** [Makefile:1948: distdir-am] Error 1
+make[2]: Leaving directory '/home/mete/shell/testsuites/grep-3.11'
+make[1]: *** [Makefile:1943: distdir] Error 2
+make[1]: Leaving directory '/home/mete/shell/testsuites/grep-3.11'
+make: *** [Makefile:2051: dist] Error 2

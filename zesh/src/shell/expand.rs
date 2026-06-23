@@ -1567,8 +1567,16 @@ fn expand_backtick(chars: &[char], start: usize, vars: &crate::shell::vars::VarS
             break;
         }
         if chars[i] == '\\' && i + 1 < chars.len() {
-            body.push(chars[i+1]);
-            i += 2;
+            if chars[i + 1] == '\n' {
+                // \<newline> inside backtick = line continuation; discard both
+                i += 2;
+            } else {
+                // Preserve the backslash and the next char; the subprocess shell
+                // handles all other escape sequences in the correct quoting context.
+                body.push('\\');
+                body.push(chars[i + 1]);
+                i += 2;
+            }
         } else {
             body.push(chars[i]);
             i += 1;

@@ -1,0 +1,162 @@
+22750 execve("/usr/bin/make", ["make", "SHELL=/home/mete/shell/zesh/target/release/zesh", "all-recursive"], 0x7ffc62abbfb8 /* 85 vars */) = 0
+22751 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "gzip --help 2>/dev/null|/usr/bin/grep rsyncable >/dev/null && printf %s --rsyncable"], 0x55dc5bb95dc0 /* 91 vars */) = 0
+22754 execve("/usr/bin/gzip", ["gzip", "--help"], 0x55f951811340 /* 91 vars */ <unfinished ...>
+22755 execve("/usr/bin/grep", ["/usr/bin/grep", "rsyncable"], 0x55f9518112e0 /* 91 vars */ <unfinished ...>
+22754 <... execve resumed>)             = 0
+22755 <... execve resumed>)             = 0
+22754 +++ exited with 0 +++
+22752 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22754, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22752 +++ exited with 0 +++
+22751 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22752, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22755 +++ exited with 0 +++
+22753 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22755, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22753 +++ exited with 0 +++
+22751 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22753, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22751 +++ exited with 0 +++
+22756 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "cat ./.prev-version 2>/dev/null"], 0x55dc5bb95dc0 /* 91 vars */) = 0
+22757 execve("/usr/bin/cat", ["cat", "./.prev-version"], 0x55be10e68390 /* 91 vars */) = 0
+22757 +++ exited with 1 +++
+22756 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22757, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
+22756 +++ exited with 1 +++
+22758 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "env LC_ALL=C /usr/bin/sed -n 's/^\\(sc_[a-zA-Z0-9_-]*\\):.*/\\1/p' ./maint.mk ./cfg.mk"], 0x55dc5bb975d0 /* 92 vars */) = 0
+22759 execve("/usr/bin/env", ["env", "LC_ALL=C", "/usr/bin/sed", "-n", "s/^\\(sc_[a-zA-Z0-9_-]*\\):.*/\\1/p", "./maint.mk", "./cfg.mk"], 0x5645ea707b20 /* 92 vars */) = 0
+22759 execve("/usr/bin/sed", ["/usr/bin/sed", "-n", "s/^\\(sc_[a-zA-Z0-9_-]*\\):.*/\\1/p", "./maint.mk", "./cfg.mk"], 0x7ffcfdf54538 /* 92 vars */) = 0
+22759 +++ exited with 0 +++
+22758 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22759, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22758 +++ exited with 0 +++
+22760 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "./build-aux/vc-list-files -C . >/dev/null 2>&1; echo $?"], 0x55dc5bb975d0 /* 92 vars */) = 0
+22761 execve("./build-aux/vc-list-files", ["./build-aux/vc-list-files", "-C", "."], 0x55db5f0d6e20 /* 92 vars */) = 0
+22762 +++ exited with 0 +++
+22761 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22762, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22761 +++ exited with 1 +++
+22760 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22761, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
+22760 +++ exited with 0 +++
+22763 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "test -f ./build-aux/git-version-gen && echo yes"], 0x55dc5bb97230 /* 102 vars */) = 0
+22763 +++ exited with 0 +++
+22764 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "fail=; \\\nif (target_option=k; case ${target_option-} in ?) ;; *) echo \"am__make_running_with_option: internal error: invalid\" \"target option '${target_option-}' specified\" >&2; exit 1;; esac; has_opt=no; sane_makeflags=$MAKEFLAGS; if { if test -z '0'; then false; elif test -n 'x86_64-pc-linux-gnu'; then true; elif test -n '4.4.1' && test -n '/home/mete/shell/testsuites/grep-3.11'; then true; else false; fi; }; then sane_makeflags=$MFLAGS; else case $MAKEFLAGS in *\\\\[\\ \\\t]*) bs=\\\\; sane_makeflags=`printf '%s\\n' \"$MAKEFLAGS\" | sed \"s/$bs$bs[$bs $bs\t]*//g\"`;; esac; fi; skip_next=no; strip_trailopt () { flg=`printf '%s\\n' \"$flg\" | sed \"s/$1.*$//\"`; }; for flg in $sane_makeflags; do test $skip_next = yes && { skip_next=no; continue; }; case $flg in *=*|--*) continue;; -*I) strip_trailopt 'I'; skip_next=yes;; -*I?*) strip_trailopt 'I';; -*O) strip_trailopt 'O'; skip_next=yes;; -*O?*) strip_trailopt 'O';; -*l) strip_trailopt 'l'; skip_next=yes;; -*l?*) strip_trailopt 'l';; -[dEDm]) skip_next=yes;; -[JT]) skip_next=yes;; esac; case $flg in *$target_option*) has_opt=yes; break;; esac; done; test $has_opt = yes); then \\\n  failcom='fail=yes'; \\\nelse \\\n  failcom='exit 1'; \\\nfi; \\\ndot_seen=no; \\\ntarget=`echo all-recursive | sed s/-recursive//`; \\\ncase \"all-recursive\" in \\\n  distclean-* | maintainer-clean-*) list='po lib doc src tests gnulib-tests' ;; \\\n  *) list='po lib doc src tests gnulib-tests' ;; \\\nesac; \\\nfor subdir in $list; do \\\n  echo \"Making $target in $subdir\"; \\\n  if test \"$subdir\" = \".\"; then \\\n    dot_seen=yes; \\\n    local_target=\"$target-am\"; \\\n  else \\\n    local_target=\"$target\"; \\\n  fi; \\\n  (CDPATH=\"${ZSH_VERSION+.}:\" && cd $subdir && make  $local_target) \\\n  || eval $failcom; \\\ndone; \\\nif test \"$dot_seen\" = \"no\"; then \\\n  make  \"$target-am\" || exit 1; \\\nfi; test -z \"$fail\""], 0x55dc5bc00810 /* 102 vars */) = 0
+22766 execve(".mailmap", [".mailmap", ".tarball-version", "ABOUT-NLS", "AUTHORS", "COPYING", "ChangeLog", "ChangeLog-2009", "GNUmakefile", "INSTALL", "Makefile", "Makefile.am", "Makefile.in", "NEWS", "README", "README-alpha", "THANKS", "THANKS.in", "TODO", "aclocal.m4", "build-aux", "cfg.mk", "config.h", "config.hin", "config.log", "config.status", "configure", "configure.ac", "dist-check.mk", "doc", "gnulib-tests", "lib", "m4", "maint.mk", "po", "src", "stamp-h1", "tests", "thanks-gen"], 0x5571f3f8a5b0 /* 102 vars */) = -1 EACCES (Erişim engellendi)
+22766 +++ exited with 127 +++
+22765 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22766, si_uid=1000, si_status=127, si_utime=0, si_stime=0} ---
+22765 +++ exited with 1 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22765, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
+22768 +++ exited with 0 +++
+22767 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22768, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22770 execve("/usr/bin/sed", ["sed", "s/-recursive//"], 0x5571f3f94090 /* 102 vars */) = 0
+22770 +++ exited with 0 +++
+22769 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22770, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22769 +++ exited with 0 +++
+22767 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22769, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22767 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22767, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22772 execve("/usr/bin/make", ["make", "all"], 0x5571f3f899f0 /* 102 vars */) = 0
+22772 +++ exited with 0 +++
+22771 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22772, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22771 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22771, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22774 execve("/usr/bin/make", ["make", "all"], 0x5571f3f89b00 /* 102 vars */) = 0
+22778 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "make  all-am"], 0x5574128f04b0 /* 102 vars */) = 0
+22779 execve("/usr/bin/make", ["make", "all-am"], 0x556bd2653670 /* 102 vars */) = 0
+22779 +++ exited with 0 +++
+22778 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22779, si_uid=1000, si_status=0, si_utime=2 /* 0.02 s */, si_stime=1 /* 0.01 s */} ---
+22778 +++ exited with 0 +++
+22774 +++ exited with 0 +++
+22773 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22774, si_uid=1000, si_status=0, si_utime=1 /* 0.01 s */, si_stime=0} ---
+22773 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22773, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22786 execve("/usr/bin/make", ["make", "all"], 0x5571f3f89b70 /* 102 vars */) = 0
+22786 +++ exited with 0 +++
+22785 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22786, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22785 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22785, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22788 execve("/usr/bin/make", ["make", "all"], 0x5571f3f89bf0 /* 102 vars */) = 0
+22788 +++ exited with 0 +++
+22787 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22788, si_uid=1000, si_status=0, si_utime=1 /* 0.01 s */, si_stime=0} ---
+22787 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22787, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22791 execve("/usr/bin/make", ["make", "all"], 0x5571f3f89c50 /* 102 vars */) = 0
+22791 +++ exited with 0 +++
+22790 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22791, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22790 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22790, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22793 execve("/usr/bin/make", ["make", "all"], 0x5571f3f89d20 /* 102 vars */) = 0
+22794 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "echo '## ---------------------------------------------------- ##'"], 0x56456e503530 /* 102 vars */) = 0
+22794 +++ exited with 0 +++
+22795 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "echo '## ------------------- Gnulib tests ------------------- ##'"], 0x56456e503530 /* 102 vars */) = 0
+22795 +++ exited with 0 +++
+22796 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "echo '## You can ignore compiler warnings in this directory.  ##'"], 0x56456e503530 /* 102 vars */) = 0
+22796 +++ exited with 0 +++
+22798 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "echo '## ---------------------------------------------------- ##'"], 0x56456e503530 /* 102 vars */) = 0
+22798 +++ exited with 0 +++
+22802 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "make  all-recursive"], 0x56456e503530 /* 102 vars */) = 0
+22803 execve("/usr/bin/make", ["make", "all-recursive"], 0x55b3ac8725f0 /* 102 vars */) = 0
+22804 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "fail=; \\\nif (target_option=k; case ${target_option-} in ?) ;; *) echo \"am__make_running_with_option: internal error: invalid\" \"target option '${target_option-}' specified\" >&2; exit 1;; esac; has_opt=no; sane_makeflags=$MAKEFLAGS; if { if test -z '2'; then false; elif test -n 'x86_64-pc-linux-gnu'; then true; elif test -n '4.4.1' && test -n '/home/mete/shell/testsuites/grep-3.11/gnulib-tests'; then true; else false; fi; }; then sane_makeflags=$MFLAGS; else case $MAKEFLAGS in *\\\\[\\ \\\t]*) bs=\\\\; sane_makeflags=`printf '%s\\n' \"$MAKEFLAGS\" | sed \"s/$bs$bs[$bs $bs\t]*//g\"`;; esac; fi; skip_next=no; strip_trailopt () { flg=`printf '%s\\n' \"$flg\" | sed \"s/$1.*$//\"`; }; for flg in $sane_makeflags; do test $skip_next = yes && { skip_next=no; continue; }; case $flg in *=*|--*) continue;; -*I) strip_trailopt 'I'; skip_next=yes;; -*I?*) strip_trailopt 'I';; -*O) strip_trailopt 'O'; skip_next=yes;; -*O?*) strip_trailopt 'O';; -*l) strip_trailopt 'l'; skip_next=yes;; -*l?*) strip_trailopt 'l';; -[dEDm]) skip_next=yes;; -[JT]) skip_next=yes;; esac; case $flg in *$target_option*) has_opt=yes; break;; esac; done; test $has_opt = yes); then \\\n  failcom='fail=yes'; \\\nelse \\\n  failcom='exit 1'; \\\nfi; \\\ndot_seen=no; \\\ntarget=`echo all-recursive | sed s/-recursive//`; \\\ncase \"all-recursive\" in \\\n  distclean-* | maintainer-clean-*) list='.' ;; \\\n  *) list='.' ;; \\\nesac; \\\nfor subdir in $list; do \\\n  echo \"Making $target in $subdir\"; \\\n  if test \"$subdir\" = \".\"; then \\\n    dot_seen=yes; \\\n    local_target=\"$target-am\"; \\\n  else \\\n    local_target=\"$target\"; \\\n  fi; \\\n  (CDPATH=\"${ZSH_VERSION+.}:\" && cd $subdir && make  $local_target) \\\n  || eval $failcom; \\\ndone; \\\nif test \"$dot_seen\" = \"no\"; then \\\n  make  \"$target-am\" || exit 1; \\\nfi; test -z \"$fail\""], 0x563789601b20 /* 102 vars */) = 0
+22806 execve(".deps", [".deps", "Makefile", "Makefile.am", "Makefile.in", "_Noreturn.h", "accept.c", "alloca.c", "altstack-util.h", "anytostr.c", "arg-nonnull.h", "arpa", "arpa_inet.in.h", "asnprintf.c", "asnprintf.o", "bind.c", "c++defs.h", "c-strcasestr.c", "c-strcasestr.h", "c-strcasestr.o", "connect.c", "current-locale", "fdopen.c", "float+.h", "float.c", "float.in.h", "fpucw.h", "ftruncate.c", "gettimeofday.c", "glthread", "gnulib.mk", "hash-pjw.c", "hash-pjw.h", "hash-pjw.o", "imaxtostr.c", "imaxtostr.o", "inet_pton.c", "init.sh", "inttostr.c", "inttostr.h", "inttostr.o", "ioctl.c", "ioctl.o", "itold.c", "libtests.a", "listen.c", "locale.c", "locale.o", "localename-table.c", "localename-table.h", "localename-table.o", "localename.c", "localename.h", "localename.o", "macros.h", "mmap-anon-util.h", "nan.h", "nanosleep.c", "nanosleep.o", "nap.h", "netinet_in.in.h", "offtostr.c", "offtostr.o", "perror.c", "printf-args.c", "printf-args.h", "printf-args.o", "printf-parse.c", "printf-parse.h", "printf-parse.o", "pselect.c", "pthread-thread.c", "pthread.h", "pthread.in.h", "pthread_sigmask.c", "putenv.c", "sched.h", "sched.in.h", "select.c", "setenv.c", "setlocale.c", "setsockopt.c", "signature.h", "sigprocmask.c", "size_max.h", "sleep.c", "snprintf.c", "socket.c", "sockets.c", "sockets.h", "sockets.o", "str-two-way.h", "strerror_r.c", "strerror_r.o", "symlink.c", "sys", "sys_ioctl.in.h", "sys_select.in.h", "sys_socket.c", "sys_socket.in.h", "sys_socket.o", "sys_time.in.h", "sys_uio.in.h", "test-accept.c", "test-alignasof.c", "test-alignof.c", "test-alloca-opt.c", "test-argmatch.c", "test-arpa_inet.c", "test-assert.c", "test-binary-io.c", "test-binary-io.sh", "test-bind.c", "test-bitrotate.c", "test-btowc.c", "test-btowc1.sh", "test-btowc2.sh", "test-btowc3.sh", "test-c-ctype.c", "test-c-stack.c", "test-c-stack.sh", "test-c-stack2.sh", "test-c-strcase.sh", "test-c-strcasecmp.c", "test-c-strcasestr.c", "test-c-strncasecmp.c", "test-calloc-gnu.c", "test-chdir.c", "test-cloexec.c", "test-close.c", "test-connect.c", "test-ctype.c", "test-dfa-invalid-char-class.sh", "test-dfa-invalid-merge.sh", "test-dfa-match-aux.c", "test-dfa-match.sh", "test-dirent.c", "test-dup-safer.c", "test-dup.c", "test-dup2.c", "test-dynarray.c", "test-environ.c", "test-errno.c", "test-error.c", "test-error.sh", "test-exclude.c", "test-exclude1.sh", "test-exclude2.sh", "test-exclude3.sh", "test-exclude4.sh", "test-exclude5.sh", "test-exclude6.sh", "test-exclude7.sh", "test-exclude8.sh", "test-fchdir.c", "test-fcntl-h.c", "test-fcntl-safer.c", "test-fcntl.c", "test-fdopen.c", "test-fdopendir.c", "test-fgetc.c", "test-float.c", "test-fnmatch-h.c", "test-fnmatch.c", "test-fopen-gnu.c", "test-fopen.c", "test-fopen.h", "test-fpending.c", "test-fpending.sh", "test-fputc.c", "test-fread.c", "test-free.c", "test-fstat.c", "test-fstatat.c", "test-ftruncate.c", "test-ftruncate.sh", "test-fwrite.c", "test-getcwd-lgpl.c", "test-getdtablesize.c", "test-getopt-gnu.c", "test-getopt-main.h", "test-getopt-posix.c", "test-getopt.h", "test-getopt_long.h", "test-getprogname.c", "test-gettimeofday.c", "test-hard-locale.c", "test-hash.c", "test-i-ring.c", "test-iconv-h.c", "test-iconv.c", "test-ignore-value.c", "test-inet_pton.c", "test-init.sh", "test-intprops.c", "test-inttostr.c", "test-inttypes.c", "test-ioctl.c", "test-isatty.c", "test-isblank.c", "test-iswblank.c", "test-iswdigit.c", "test-iswdigit.sh", "test-iswxdigit.c", "test-iswxdigit.sh", "test-langinfo.c", "test-largefile.c", "test-limits-h.c", "test-listen.c", "test-localcharset", "test-localcharset.c", "test-localcharset.o", "test-locale.c", "test-localeconv.c", "test-localename.c", "test-lseek.c", "test-lseek.sh", "test-lstat.c", "test-lstat.h", "test-malloc-gnu.c", "test-malloca.c", "test-mbrlen-w32-1.sh", "test-mbrlen-w32-2.sh", "test-mbrlen-w32-3.sh", "test-mbrlen-w32-4.sh", "test-mbrlen-w32-5.sh", "test-mbrlen-w32-6.sh", "test-mbrlen-w32-7.sh", "test-mbrlen-w32.c", "test-mbrlen.c", "test-mbrlen1.sh", "test-mbrlen2.sh", "test-mbrlen3.sh", "test-mbrlen4.sh", "test-mbrlen5.sh", "test-mbscasecmp.c", "test-mbscasecmp.sh", "test-mbsinit.c", "test-mbsinit.sh", "test-mbsrtowcs.c", "test-mbsrtowcs1.sh", "test-mbsrtowcs2.sh", "test-mbsrtowcs3.sh", "test-mbsrtowcs4.sh", "test-mbsrtowcs5.sh", "test-mbsstr1.c", "test-mbsstr2.c", "test-mbsstr2.sh", "test-mbsstr3.c", "test-mbsstr3.sh", "test-memchr.c", "test-memchr2.c", "test-memrchr.c", "test-nanosleep.c", "test-netinet_in.c", "test-nl_langinfo-mt.c", "test-nl_langinfo1.c", "test-nl_langinfo1.sh", "test-nl_langinfo2.c", "test-nl_langinfo2.sh", "test-open.c", "test-open.h", "test-openat-safer.c", "test-openat.c", "test-pathmax.c", "test-perror.c", "test-perror.sh", "test-perror2.c", "test-pipe.c", "test-pselect.c", "test-pthread-thread.c", "test-pthread.c", "test-pthread_sigmask1.c", "test-pthread_sigmask2.c", "test-quotearg-simple.c", "test-quotearg.h", "test-raise.c", "test-rawmemchr.c", "test-read.c", "test-realloc-gnu.c", "test-reallocarray.c", "test-regex.c", "test-sched.c", "test-select-fd.c", "test-select-in.sh", "test-select-out.sh", "test-select-stdin.c", "test-select.c", "test-select.h", "test-setenv.c", "test-setlocale1.c", "test-setlocale1.sh", "test-setlocale2.c", "test-setlocale2.sh", "test-setlocale_null-mt-all.c", "test-setlocale_null-mt-one.c", "test-setlocale_null.c", "test-setsockopt.c", "test-signal-h.c", "test-sigprocmask.c", "test-sigsegv-catch-segv1.c", "test-sigsegv-catch-segv2.c", "test-sigsegv-catch-stackoverflow1.c", "test-sigsegv-catch-stackoverflow2.c", "test-sleep.c", "test-snprintf.c", "test-sockets.c", "test-stat-time.c", "test-stat.c", "test-stat.h", "test-stdbool.c", "test-stdckdint.c", "test-stddef.c", "test-stdint.c", "test-stdio.c", "test-stdlib.c", "test-strerror.c", "test-strerror_r.c", "test-striconv.c", "test-string.c", "test-strnlen.c", "test-strstr.c", "test-strtoimax.c", "test-strtoll.c", "test-strtoull.c", "test-strtoumax.c", "test-symlink.c", "test-symlink.h", "test-sys_ioctl.c", "test-sys_select.c", "test-sys_socket.c", "test-sys_stat.c", "test-sys_time.c", "test-sys_types.c", "test-sys_uio.c", "test-sys_wait.h", "test-thread_create.c", "test-thread_self.c", "test-time-h.c", "test-time.c", "test-trim.c", "test-trim1.sh", "test-trim2.sh", "test-trim3.sh", "test-unistd.c", "test-unsetenv.c", "test-vasnprintf.c", "test-vc-list-files-cvs.sh", "test-vc-list-files-git.sh", "test-verify-try.c", "test-verify.c", "test-verify.sh", "test-version-etc.c", "test-version-etc.sh", "test-wchar.c", "test-wcrtomb-w32-1.sh", "test-wcrtomb-w32-2.sh", "test-wcrtomb-w32-3.sh", "test-wcrtomb-w32-4.sh", "test-wcrtomb-w32-5.sh", "test-wcrtomb-w32-6.sh", "test-wcrtomb-w32-7.sh", "test-wcrtomb-w32.c", "test-wcrtomb.c", "test-wcrtomb.sh", "test-wctype-h.c", "test-wcwidth.c", "test-xalloc-die.c", "test-xalloc-die.sh", "test-xstrtoimax.c", "test-xstrtoimax.sh", "test-xstrtol.c", "test-xstrtol.sh", "test-xstrtoul.c", "test-year2038.c", "thread-optim.h", "time.c", "time.o", "uinttostr.c", "uinttostr.o", "umaxtostr.c", "umaxtostr.o", "unistr", "uniwidth", "unsetenv.c", "vasnprintf.c", "vasnprintf.h", "vasnprintf.o", "w32sock.h", "warn-on-use.h", "windows-thread.c", "windows-thread.h", "windows-tls.c", "windows-tls.h", "xsize.c", "xsize.h", "xsize.o", "xstrtol-error.c", "xstrtol-error.h", "xstrtol-error.o", "zerosize-ptr.h"], 0x563d7eda9d90 /* 102 vars */) = -1 EACCES (Erişim engellendi)
+22806 +++ exited with 127 +++
+22805 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22806, si_uid=1000, si_status=127, si_utime=0, si_stime=0} ---
+22805 +++ exited with 1 +++
+22804 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22805, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
+22808 +++ exited with 0 +++
+22807 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22808, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22810 execve("/usr/bin/sed", ["sed", "s/-recursive//"], 0x563d7eda9460 /* 102 vars */) = 0
+22810 +++ exited with 0 +++
+22809 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22810, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22809 +++ exited with 0 +++
+22807 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22809, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22807 +++ exited with 0 +++
+22804 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22807, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22812 execve("/usr/bin/make", ["make", "all-am"], 0x563d7ed9e760 /* 102 vars */) = 0
+22812 +++ exited with 0 +++
+22811 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22812, si_uid=1000, si_status=0, si_utime=1 /* 0.01 s */, si_stime=1 /* 0.01 s */} ---
+22811 +++ exited with 0 +++
+22804 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22811, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22804 +++ exited with 0 +++
+22803 +++ exited with 0 +++
+22802 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22803, si_uid=1000, si_status=0, si_utime=1 /* 0.01 s */, si_stime=1 /* 0.01 s */} ---
+22802 +++ exited with 0 +++
+22793 +++ exited with 0 +++
+22792 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22793, si_uid=1000, si_status=0, si_utime=1 /* 0.01 s */, si_stime=0} ---
+22792 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22792, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22817 execve("/usr/bin/make", ["make", "all-am"], 0x5571f3f7f5e0 /* 102 vars */) = 0
+22818 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "gzip --help 2>/dev/null|/usr/bin/grep rsyncable >/dev/null && printf %s --rsyncable"], 0x5562d835d5a0 /* 102 vars */) = 0
+22822 execve("/usr/bin/grep", ["/usr/bin/grep", "rsyncable"], 0x55ef38e05590 /* 102 vars */ <unfinished ...>
+22821 execve("/usr/bin/gzip", ["gzip", "--help"], 0x55ef38e055c0 /* 102 vars */ <unfinished ...>
+22822 <... execve resumed>)             = 0
+22821 <... execve resumed>)             = 0
+22821 +++ exited with 0 +++
+22819 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22821, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22819 +++ exited with 0 +++
+22818 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22819, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22822 +++ exited with 0 +++
+22820 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22822, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22820 +++ exited with 0 +++
+22818 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22820, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22818 +++ exited with 0 +++
+22823 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "cat ./.prev-version 2>/dev/null"], 0x5562d835d5a0 /* 102 vars */) = 0
+22824 execve("/usr/bin/cat", ["cat", "./.prev-version"], 0x55da725f39e0 /* 102 vars */) = 0
+22824 +++ exited with 1 +++
+22823 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22824, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
+22823 +++ exited with 1 +++
+22825 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "env LC_ALL=C /usr/bin/sed -n 's/^\\(sc_[a-zA-Z0-9_-]*\\):.*/\\1/p' ./maint.mk ./cfg.mk"], 0x5562d835d5a0 /* 102 vars */) = 0
+22826 execve("/usr/bin/env", ["env", "LC_ALL=C", "/usr/bin/sed", "-n", "s/^\\(sc_[a-zA-Z0-9_-]*\\):.*/\\1/p", "./maint.mk", "./cfg.mk"], 0x5615efb889b0 /* 102 vars */) = 0
+22826 execve("/usr/bin/sed", ["/usr/bin/sed", "-n", "s/^\\(sc_[a-zA-Z0-9_-]*\\):.*/\\1/p", "./maint.mk", "./cfg.mk"], 0x7ffe014b7dd8 /* 102 vars */) = 0
+22826 +++ exited with 0 +++
+22825 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22826, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22825 +++ exited with 0 +++
+22827 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "./build-aux/vc-list-files -C . >/dev/null 2>&1; echo $?"], 0x5562d835d5a0 /* 102 vars */) = 0
+22828 execve("./build-aux/vc-list-files", ["./build-aux/vc-list-files", "-C", "."], 0x5633c78e5d60 /* 102 vars */) = 0
+22829 +++ exited with 0 +++
+22828 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22829, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22828 +++ exited with 1 +++
+22827 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22828, si_uid=1000, si_status=1, si_utime=0, si_stime=0} ---
+22827 +++ exited with 0 +++
+22830 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "test -f ./build-aux/git-version-gen && echo yes"], 0x5562d835d5a0 /* 102 vars */) = 0
+22830 +++ exited with 0 +++
+22831 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "test -f config.h || rm -f stamp-h1"], 0x5562d835b2d0 /* 102 vars */) = 0
+22831 +++ exited with 0 +++
+22832 execve("/home/mete/shell/zesh/target/release/zesh", ["/home/mete/shell/zesh/target/release/zesh", "-c", "test -f config.h || make  stamp-h1"], 0x5562d835b2d0 /* 102 vars */) = 0
+22832 +++ exited with 0 +++
+22817 +++ exited with 0 +++
+22764 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=22817, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+22764 +++ exited with 0 +++
+22750 +++ exited with 0 +++

@@ -92,16 +92,28 @@ pub fn builtin_printf(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext
     }
 
     let fmt = &args[0];
-    let fmt_args = &args[1..];
-    let output = printf_format(fmt, fmt_args);
-    print!("{}", output);
+    let mut remaining = &args[1..];
+    loop {
+        let (output, consumed) = printf_format(fmt, remaining);
+        print!("{}", output);
+        // POSIX: repeat the format for each batch of remaining args.
+        // Stop when no specifiers were consumed (format has no conversion specs)
+        // or when all args are exhausted.
+        if consumed == 0 || remaining.is_empty() {
+            break;
+        }
+        remaining = &remaining[consumed..];
+        if remaining.is_empty() {
+            break;
+        }
+    }
     let _ = io::stdout().flush();
 
     crate::shell::executor::restore_redirections_builtin(saved);
     0
 }
 
-fn printf_format(fmt: &str, args: &[String]) -> String {
+fn printf_format(fmt: &str, args: &[String]) -> (String, usize) {
     let mut result = String::new();
     let chars: Vec<char> = fmt.chars().collect();
     let mut i = 0;
@@ -294,7 +306,7 @@ fn printf_format(fmt: &str, args: &[String]) -> String {
             i += 1;
         }
     }
-    result
+    (result, arg_idx)
 }
 
 pub fn builtin_cd(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
@@ -975,9 +987,13 @@ fn get_inode(path: &str) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.ino())
 }
 
-pub fn builtin_eval(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+pub fn builtin_eval(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+    use crate::shell::executor::apply_redirections_for_builtin;
+    let saved = apply_redirections_for_builtin(redirs, ctx, vars);
     let code = args.join(" ");
-    crate::shell::executor::run_script(&code, &ctx.script_file.clone(), ctx, vars)
+    let status = crate::shell::executor::run_script(&code, &ctx.script_file.clone(), ctx, vars);
+    crate::shell::executor::restore_redirections_builtin(saved);
+    status
 }
 
 pub fn builtin_type(args: &[String], vars: &VarStore) -> i32 {

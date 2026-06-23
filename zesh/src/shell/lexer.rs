@@ -511,41 +511,8 @@ impl Lexer {
         loop {
             match self.peek() {
                 None => break,
-                Some('[') if bracket_depth == 0 => {
-                    // Starting a bracket expression
-                    bracket_depth += 1;
-                    value.push('[');
-                    self.advance();
-                }
-                Some(']') if bracket_depth > 0 => {
-                    // Ending a bracket expression
-                    bracket_depth -= 1;
-                    value.push(']');
-                    self.advance();
-                }
-                Some(c) if bracket_depth > 0 => {
-                    // Inside bracket expression, all chars are literal (don't break on whitespace)
-                    value.push(c);
-                    self.advance();
-                }
-                Some(c) if is_word_break(c) => {
-                    // Don't stop at { if preceded by \$ (escaped dollar sign)
-                    if c == '{' && value.ends_with("\\$") {
-                        // Start tracking that we're in a literal ${...}
-                        value.push(c);
-                        self.advance();
-                        in_escaped_brace = true;
-                        continue;
-                    }
-                    // Don't stop at } if we're inside a \${...} sequence
-                    if c == '}' && in_escaped_brace {
-                        value.push(c);
-                        self.advance();
-                        in_escaped_brace = false;
-                        continue;
-                    }
-                    break;
-                }
+                // IMPORTANT: Handle quotes/dollar/escape BEFORE checking is_word_break/bracket_depth
+                // This ensures proper processing of constructs like "${arr[0]}"
                 Some('\'') => {
                     quoted = true;
                     self.advance();
@@ -629,6 +596,47 @@ impl Lexer {
                         None => {}
                     }
                 }
+                // Bracket expressions: handle [ and ] for glob patterns
+                // These must come AFTER quote/expansion handling so [0] inside "${x[0]}" works
+                // IMPORTANT: Don't enter bracket mode if [ is followed by whitespace,
+                // since "[ ... ]" is the test command, not a glob bracket expression
+                Some('[') if bracket_depth == 0 && !matches!(self.peek2(), Some(' ') | Some('\t') | Some('\n') | None) => {
+                    // Starting a bracket expression (only if next char is not whitespace)
+                    bracket_depth += 1;
+                    value.push('[');
+                    self.advance();
+                }
+                Some(']') if bracket_depth > 0 => {
+                    // Ending a bracket expression
+                    bracket_depth -= 1;
+                    value.push(']');
+                    self.advance();
+                }
+                Some(c) if bracket_depth > 0 => {
+                    // Inside bracket expression, all chars are literal (don't break on whitespace)
+                    value.push(c);
+                    self.advance();
+                }
+                // Word break handling
+                Some(c) if is_word_break(c) => {
+                    // Don't stop at { if preceded by \$ (escaped dollar sign)
+                    if c == '{' && value.ends_with("\\$") {
+                        // Start tracking that we're in a literal ${...}
+                        value.push(c);
+                        self.advance();
+                        in_escaped_brace = true;
+                        continue;
+                    }
+                    // Don't stop at } if we're inside a \${...} sequence
+                    if c == '}' && in_escaped_brace {
+                        value.push(c);
+                        self.advance();
+                        in_escaped_brace = false;
+                        continue;
+                    }
+                    break;
+                }
+                // Default: regular character
                 Some(c) => {
                     value.push(c);
                     self.advance();
@@ -695,14 +703,6 @@ impl Lexer {
                 Some(')') => {
                     self.advance();
                     tokens.push(Token { kind: TokKind::RParen, value: ")".to_string(), quoted: false, line });
-                }
-                Some('{') => {
-                    self.advance();
-                    tokens.push(Token { kind: TokKind::LBrace, value: "{".to_string(), quoted: false, line });
-                }
-                Some('}') => {
-                    self.advance();
-                    tokens.push(Token { kind: TokKind::RBrace, value: "}".to_string(), quoted: false, line });
                 }
                 Some('!') => {
                     self.advance();
@@ -1007,8 +1007,11 @@ impl Lexer {
 
 fn is_word_break(c: char) -> bool {
     // These characters end a word when encountered unquoted
-    // { and } ARE word breaks (standalone brace group delimiters)
-    matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '|' | '<' | '>' | '(' | ')' | '{' | '}')
+    // Note: { and } are NOT word breaks — they can appear as literal characters in words
+    // (e.g., echo {} or find ... -exec ... {} \;). They should only be special tokens
+    // when the parser recognizes { as starting a compound statement (which happens via
+    // word-value inspection, not token-kind inspection).
+    matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '|' | '<' | '>' | '(' | ')')
 }
 
 fn word_to_keyword(word: &str) -> TokKind {

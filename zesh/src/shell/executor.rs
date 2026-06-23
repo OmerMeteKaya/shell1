@@ -1339,7 +1339,7 @@ fn try_builtin(name: &str, args: &[String], redirs: &[FdRedir], ctx: &mut ExecCo
         "false"     => Some(1),
         "test" | "[" => Some(builtin_test(args)),
         "[[" | "]]" => Some(0), // handled in parser
-        "eval"      => Some(builtin_eval(args, ctx, vars)),
+        "eval"      => Some(builtin_eval(args, redirs, ctx, vars)),
         "type"      => {
             let status = builtin_type(args, vars);
             Some(with_redirections(redirs, ctx, vars, |_, _| status))

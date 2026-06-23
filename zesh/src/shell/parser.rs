@@ -48,7 +48,8 @@ impl Parser {
     }
 
     fn skip_newlines(&mut self) {
-        while matches!(self.peek_kind(), TokKind::Newline | TokKind::Semi) {
+        while matches!(self.peek_kind(), TokKind::Newline) ||
+              (self.peek_kind() == &TokKind::Semi && self.peek().value == ";") {
             self.advance();
         }
     }
@@ -73,7 +74,7 @@ impl Parser {
         let mut nodes = Vec::new();
         self.skip_newlines();
 
-        while !matches!(self.peek_kind(), TokKind::Eof) {
+        while !matches!(self.peek_kind(), TokKind::Eof) && !self.is_close_brace() {
             let node = self.parse_and_or();
             if let Some(mut node) = node {
                 match self.peek_kind() {
@@ -102,11 +103,20 @@ impl Parser {
                 break;
             }
 
-            if matches!(self.peek_kind(), TokKind::Eof | TokKind::RParen | TokKind::RBrace) {
+            if matches!(self.peek_kind(), TokKind::Eof | TokKind::RParen | TokKind::RBrace)
+                || self.is_close_brace()
+            {
                 break;
             }
         }
         nodes
+    }
+
+    // Returns true when the current token is an unquoted `}` word (closes a brace group).
+    fn is_close_brace(&self) -> bool {
+        self.peek_kind() == &TokKind::Word
+            && self.peek().value == "}"
+            && !self.peek().quoted
     }
 
     fn parse_and_or(&mut self) -> Option<CmdNode> {
@@ -281,7 +291,30 @@ impl Parser {
                     lineno: line,
                 })
             }
+            TokKind::Word if self.peek().value == "{" => {
+                // Compound statement with braces: { list }
+                self.advance(); // consume {
+                self.skip_newlines();
+                let body = self.parse_list();
+                // Consume closing }
+                if self.peek_kind() == &TokKind::Word && self.peek().value == "}" {
+                    self.advance();
+                } else {
+                    self.parse_error = Some("expected } in brace group".to_string());
+                }
+                let redirs = self.parse_redirs();
+                Some(CmdNode {
+                    kind: CompoundKind::Brace(body),
+                    redirs,
+                    background: false,
+                    negate: false,
+                    op: NodeOp::End,
+                    lineno: line,
+                })
+            }
             TokKind::LBrace => {
+                // This case should not happen anymore since { is now a Word token,
+                // but keep it for safety/backwards compatibility
                 self.advance();
                 self.skip_newlines();
                 let body = self.parse_list();
@@ -723,8 +756,11 @@ impl Parser {
         self.advance(); // coproc
         let name = if matches!(self.peek_kind(), TokKind::Word) {
             let n = self.peek().value.clone();
-            // Check if next is { - if so, this is the name
-            if self.tokens.get(self.pos + 1).map(|t| &t.kind) == Some(&TokKind::LBrace) {
+            // Check if next is { - if so, this is the name. Note: { is now a Word token, not LBrace
+            if self.tokens.get(self.pos + 1)
+                .map(|t| t.kind == TokKind::Word && t.value == "{")
+                .unwrap_or(false)
+            {
                 self.advance();
                 n
             } else {
