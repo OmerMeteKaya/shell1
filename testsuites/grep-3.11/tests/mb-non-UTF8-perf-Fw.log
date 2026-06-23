@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.uPxD
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.5k43
 + exit 0
 PASS mb-non-UTF8-perf-Fw (exit status: 0)

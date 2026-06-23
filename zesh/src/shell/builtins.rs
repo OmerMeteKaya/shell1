@@ -1033,7 +1033,7 @@ pub fn is_builtin(name: &str) -> bool {
         "type" | "hash" | "wait" | "jobs" | "kill" | "trap" | "umask" | "ulimit" |
         "getopts" | "mapfile" | "readarray" | "caller" | "compgen" | "complete" |
         "disown" | "shift" | "let" | "builtin" | "command" | "times" | "suspend" |
-        "fc" | "history" | "dirs" | "popd" | "pushd" | "exec"
+        "fc" | "history" | "dirs" | "popd" | "pushd" | "exec" | "bg" | "fg"
     )
 }
 
@@ -1161,17 +1161,265 @@ pub fn builtin_jobs(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, 
     use crate::shell::executor::apply_redirections_for_builtin;
     let saved = apply_redirections_for_builtin(redirs, ctx, vars);
 
-    let jobs = crate::shell::jobs::jobs();
-    let mut job_ids: Vec<usize> = jobs.jobs.keys().copied().collect();
+    let mut show_pids_only = false;
+    let mut show_long = false;
+    let mut job_spec: Option<String> = None;
+    let mut i = 0;
+
+    // Parse flags
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with('-') && arg.len() > 1 {
+            for ch in arg[1..].chars() {
+                match ch {
+                    'p' => show_pids_only = true,
+                    'l' => show_long = true,
+                    _ => {
+                        eprintln!("zesh: jobs: invalid option -- '{}'", ch);
+                        crate::shell::executor::restore_redirections_builtin(saved);
+                        return 1;
+                    }
+                }
+            }
+        } else {
+            // This is a job spec
+            job_spec = Some(arg.clone());
+            break;
+        }
+        i += 1;
+    }
+
+    let jobs_lock = crate::shell::jobs::jobs();
+    let mut job_ids: Vec<usize> = jobs_lock.jobs.keys().copied().collect();
     job_ids.sort();
+
+    // Filter to specific job if requested
+    if let Some(spec) = job_spec {
+        match jobs_lock.resolve_job_spec(&spec) {
+            Ok(id) => {
+                job_ids = vec![id];
+            }
+            Err(e) => {
+                eprintln!("zesh: jobs: {}", e);
+                crate::shell::executor::restore_redirections_builtin(saved);
+                return 1;
+            }
+        }
+    }
+
     for id in job_ids {
-        if let Some(job) = jobs.jobs.get(&id) {
-            println!("[{}] {} {}", id, job.pid, job.cmd);
+        if let Some(job) = jobs_lock.jobs.get(&id) {
+            if show_pids_only {
+                // jobs -p: show only pids
+                println!("{}", job.pid);
+            } else {
+                let marker = if Some(id) == jobs_lock.current_job_id {
+                    "+"
+                } else if Some(id) == jobs_lock.previous_job_id {
+                    "-"
+                } else {
+                    " "
+                };
+
+                let status_str = match &job.status {
+                    crate::shell::jobs::JobStatus::Running => "Running",
+                    crate::shell::jobs::JobStatus::Stopped => "Stopped",
+                    crate::shell::jobs::JobStatus::Done(code) => "Done",
+                };
+
+                // Add trailing & for all background jobs (they were started with &)
+                let cmd_display = format!("{} &", job.cmd);
+
+                if show_long {
+                    // jobs -l: show with pid - format: [id]marker  pid  status   command &
+                    println!("[{}]{}  {}  {}   {}", id, marker, job.pid, status_str, cmd_display);
+                } else {
+                    // Normal format - format: [id]marker  status   command &
+                    println!("[{}]{}  {}   {}", id, marker, status_str, cmd_display);
+                }
+            }
         }
     }
 
     crate::shell::executor::restore_redirections_builtin(saved);
     0
+}
+
+pub fn builtin_bg(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+    use crate::shell::executor::apply_redirections_for_builtin;
+    let saved = apply_redirections_for_builtin(redirs, ctx, vars);
+
+    let mut jobs_lock = crate::shell::jobs::jobs();
+
+    let job_id = if args.is_empty() {
+        // Default to current job
+        match jobs_lock.current_job_id {
+            Some(id) => id,
+            None => {
+                eprintln!("zesh: bg: no current job");
+                crate::shell::executor::restore_redirections_builtin(saved);
+                return 1;
+            }
+        }
+    } else {
+        // Resolve job spec
+        match jobs_lock.resolve_job_spec(&args[0]) {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("zesh: bg: {}", e);
+                crate::shell::executor::restore_redirections_builtin(saved);
+                return 1;
+            }
+        }
+    };
+
+    if let Some(job) = jobs_lock.find_by_id(job_id).cloned() {
+        if job.status == crate::shell::jobs::JobStatus::Stopped {
+            // Resume stopped job with SIGCONT
+            let pgid = job.pgid;
+
+            // Send SIGCONT to the process group
+            // SAFETY: kill with negative pgid sends signal to process group
+            unsafe { let _ = libc::kill(-pgid, libc::SIGCONT); }
+
+            // Update job status to Running
+            if let Some(j) = jobs_lock.find_by_id_mut(job_id) {
+                j.status = crate::shell::jobs::JobStatus::Running;
+            }
+
+            println!("[{}] {}", job_id, job.cmd);
+            crate::shell::executor::restore_redirections_builtin(saved);
+            return 0;
+        } else if job.status == crate::shell::jobs::JobStatus::Running {
+            // Already running, just print it
+            println!("[{}] {}", job_id, job.cmd);
+            crate::shell::executor::restore_redirections_builtin(saved);
+            return 0;
+        } else {
+            eprintln!("zesh: bg: job not running or stopped");
+            crate::shell::executor::restore_redirections_builtin(saved);
+            return 1;
+        }
+    } else {
+        eprintln!("zesh: bg: job not found");
+        crate::shell::executor::restore_redirections_builtin(saved);
+        return 1;
+    }
+}
+
+pub fn builtin_fg(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+    use crate::shell::executor::apply_redirections_for_builtin;
+    let saved = apply_redirections_for_builtin(redirs, ctx, vars);
+
+    let mut jobs_lock = crate::shell::jobs::jobs();
+
+    let job_id = if args.is_empty() {
+        // Default to current job
+        match jobs_lock.current_job_id {
+            Some(id) => id,
+            None => {
+                eprintln!("zesh: fg: no current job");
+                crate::shell::executor::restore_redirections_builtin(saved);
+                return 1;
+            }
+        }
+    } else {
+        // Resolve job spec
+        match jobs_lock.resolve_job_spec(&args[0]) {
+            Ok(id) => id,
+            Err(e) => {
+                eprintln!("zesh: fg: {}", e);
+                crate::shell::executor::restore_redirections_builtin(saved);
+                return 1;
+            }
+        }
+    };
+
+    let job = jobs_lock.find_by_id(job_id).cloned();
+
+    if let Some(job) = job {
+        // Job can be Running or Stopped, both are valid for fg
+        if matches!(job.status, crate::shell::jobs::JobStatus::Running | crate::shell::jobs::JobStatus::Stopped) {
+            let pgid = job.pgid;
+            let job_cmd = job.cmd.clone();
+            let was_stopped = job.status == crate::shell::jobs::JobStatus::Stopped;
+
+            // If job was stopped, send SIGCONT to resume it
+            if was_stopped {
+                unsafe { let _ = libc::kill(-pgid, libc::SIGCONT); }
+                // Update status to Running
+                if let Some(j) = jobs_lock.find_by_id_mut(job_id) {
+                    j.status = crate::shell::jobs::JobStatus::Running;
+                }
+            }
+
+            // Drop the lock before foreground operations
+            drop(jobs_lock);
+
+            // Get shell pgid for later reclaiming
+            let shell_pgid = crate::shell::signals::G_SHELL_PGID.load(std::sync::atomic::Ordering::SeqCst);
+
+            // Give terminal control to the job
+            if shell_pgid > 0 {
+                // Set foreground pgid so signal handler can forward signals to the job
+                crate::shell::signals::G_FOREGROUND_PID.store(pgid, std::sync::atomic::Ordering::SeqCst);
+                // SAFETY: tcsetpgrp to give terminal control to job
+                unsafe { let _ = libc::tcsetpgrp(0, pgid); }
+            }
+
+            // Wait for the job to complete or stop
+            let mut last_status = 0;
+            loop {
+                let mut wstatus = 0;
+                // SAFETY: waitpid with valid pgid (negative means process group), WUNTRACED to detect stops
+                if unsafe { libc::waitpid(-(pgid as i32), &mut wstatus, libc::WUNTRACED) } > 0 {
+                    if libc::WIFEXITED(wstatus) {
+                        last_status = libc::WEXITSTATUS(wstatus);
+                        break;
+                    } else if libc::WIFSIGNALED(wstatus) {
+                        last_status = 128 + libc::WTERMSIG(wstatus);
+                        break;
+                    } else if libc::WIFSTOPPED(wstatus) {
+                        // Job stopped again - mark it and return
+                        let mut jobs_lock = crate::shell::jobs::jobs();
+                        if let Some(j) = jobs_lock.find_by_id_mut(job_id) {
+                            j.status = crate::shell::jobs::JobStatus::Stopped;
+                        }
+                        drop(jobs_lock);
+                        eprintln!("\n[{}]+  Stopped                 {}", job_id, job_cmd);
+                        last_status = 128 + libc::WSTOPSIG(wstatus);
+                        break;
+                    }
+                } else {
+                    break;
+                }
+            }
+
+            // Reclaim terminal for shell and clear foreground pgid
+            if shell_pgid > 0 {
+                crate::shell::signals::G_FOREGROUND_PID.store(-1, std::sync::atomic::Ordering::SeqCst);
+                // SAFETY: tcsetpgrp to reclaim terminal
+                unsafe { let _ = libc::tcsetpgrp(0, shell_pgid); }
+            }
+
+            // Remove job from table if it completed
+            if libc::WIFEXITED(last_status as i32) || libc::WIFSIGNALED(last_status as i32) {
+                crate::shell::jobs::jobs().remove(job.pid);
+            }
+
+            crate::shell::executor::restore_redirections_builtin(saved);
+            vars.set_raw("?", last_status.to_string(), 0);
+            last_status
+        } else {
+            eprintln!("zesh: fg: job not running or stopped");
+            crate::shell::executor::restore_redirections_builtin(saved);
+            return 1;
+        }
+    } else {
+        eprintln!("zesh: fg: no such job");
+        crate::shell::executor::restore_redirections_builtin(saved);
+        1
+    }
 }
 
 pub fn builtin_kill(args: &[String]) -> i32 {
@@ -1185,8 +1433,21 @@ pub fn builtin_kill(args: &[String]) -> i32 {
                 "0" => 0,
                 "1" | "HUP" => libc::SIGHUP,
                 "2" | "INT" => libc::SIGINT,
+                "3" | "QUIT" => libc::SIGQUIT,
+                "6" | "ABRT" => libc::SIGABRT,
                 "9" | "KILL" => libc::SIGKILL,
                 "15" | "TERM" => libc::SIGTERM,
+                "19" | "STOP" => libc::SIGSTOP,
+                "18" | "CONT" => libc::SIGCONT,
+                "20" | "TSTP" => libc::SIGTSTP,
+                "21" | "TTIN" => libc::SIGTTIN,
+                "22" | "TTOU" => libc::SIGTTOU,
+                "24" | "XCPU" => libc::SIGXCPU,
+                "25" | "XFSZ" => libc::SIGXFSZ,
+                "14" | "ALRM" => libc::SIGALRM,
+                "10" | "USR1" => libc::SIGUSR1,
+                "12" | "USR2" => libc::SIGUSR2,
+                // Try parsing as a number
                 s => s.parse().unwrap_or(libc::SIGTERM),
             };
             start = 1;

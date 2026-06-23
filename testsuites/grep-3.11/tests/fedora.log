@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.78qE
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.wa1B
 + exit 0
 PASS fedora (exit status: 0)

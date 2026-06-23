@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.8PlB
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HDGl
 + exit 0
 PASS surrogate-pair (exit status: 0)

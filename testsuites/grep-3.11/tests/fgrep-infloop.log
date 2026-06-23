@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lvEQ
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.C2HQ
 + exit 0
 PASS fgrep-infloop (exit status: 0)

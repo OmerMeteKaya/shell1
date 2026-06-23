@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.1Zjh
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ftpb
 + exit 0
 PASS hangul-syllable (exit status: 0)

@@ -8,6 +8,7 @@ pub static G_INTERRUPT_LOOP: AtomicBool = AtomicBool::new(false);
 pub static G_FOREGROUND_PID: AtomicI32 = AtomicI32::new(-1);
 pub static G_EXIT_TRAP_RUNNING: AtomicBool = AtomicBool::new(false);
 pub static G_PENDING_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
+pub static G_SHELL_PGID: AtomicI32 = AtomicI32::new(-1);
 
 // Trap actions: index = signal number
 pub static G_TRAP_ACTIONS: Mutex<[Option<String>; 32]> = Mutex::new([
@@ -22,22 +23,53 @@ extern "C" fn handle_sigint(_sig: libc::c_int) {
     G_SIGINT_RECEIVED.store(true, Ordering::SeqCst);
     G_INTERRUPT_LOOP.store(true, Ordering::SeqCst);
 
-    let fgpid = G_FOREGROUND_PID.load(Ordering::SeqCst);
-    if fgpid > 0 {
-        // SAFETY: sending SIGINT to a process group is valid
-        unsafe { libc::kill(fgpid, libc::SIGINT); }
+    let fgpgid = G_FOREGROUND_PID.load(Ordering::SeqCst);
+    if fgpgid > 0 {
+        // fgpgid is actually a process group id (pgid). Send SIGINT to the entire process group
+        // by using the negative pgid. SAFETY: sending SIGINT to a process group is valid
+        unsafe { libc::kill(-fgpgid, libc::SIGINT); }
     }
 }
 
 extern "C" fn handle_sigchld(_sig: libc::c_int) {
-    // Reap any zombie children
+    // Reap any zombie children and detect stops
     loop {
-        let pid = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+        let mut wstatus: libc::c_int = 0;
+        let pid = unsafe { libc::waitpid(-1, &mut wstatus, libc::WNOHANG | libc::WUNTRACED) };
         if pid <= 0 { break; }
+
+        // Try to detect and record stopped children
+        // Use best-effort locking - if we can't get the lock, skip the update
+        if libc::WIFSTOPPED(wstatus) {
+            if let Some(mut jobs_table) = crate::shell::jobs::try_get_jobs() {
+                if let Some(job) = jobs_table.find_by_pid_mut(pid) {
+                    job.status = crate::shell::jobs::JobStatus::Stopped;
+                }
+            }
+        }
+    }
+}
+
+pub fn init_shell_pgid() {
+    // Claim the controlling terminal for the shell (pgid already initialized in setup_signals)
+    // SAFETY: tcsetpgrp is safe to call when interactive
+    unsafe {
+        let pgid = G_SHELL_PGID.load(Ordering::SeqCst);
+        if pgid > 0 {
+            let _ = libc::tcsetpgrp(0, pgid);
+        }
     }
 }
 
 pub fn setup_signals() {
+    // Initialize shell's process group (for both interactive and non-interactive modes)
+    // In non-interactive mode, we won't call tcsetpgrp, but we still need the pgid for signal handling
+    unsafe {
+        let _ = libc::setpgid(0, 0);
+        let pgid = libc::getpgrp();
+        G_SHELL_PGID.store(pgid, Ordering::SeqCst);
+    }
+
     // SAFETY: setting up signal handlers with valid function pointers
     unsafe {
         let mut sa: libc::sigaction = std::mem::zeroed();
@@ -50,7 +82,7 @@ pub fn setup_signals() {
         let mut sa2: libc::sigaction = std::mem::zeroed();
         sa2.sa_sigaction = handle_sigchld as usize;
         libc::sigemptyset(&mut sa2.sa_mask);
-        sa2.sa_flags = libc::SA_RESTART | libc::SA_NOCLDSTOP;
+        sa2.sa_flags = libc::SA_RESTART;
         libc::sigaction(libc::SIGCHLD, &sa2, std::ptr::null_mut());
 
         // Ignore SIGPIPE

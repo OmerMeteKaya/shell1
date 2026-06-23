@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Qp4F
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aA3a
 + exit 0
 PASS repetition-overflow (exit status: 0)

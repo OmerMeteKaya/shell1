@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rVp7
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.R9Ai
 + exit 0
 PASS pcre-z (exit status: 0)

@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6vbi
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.GfgL
 + exit 0
 PASS multiple-begin-or-end-line (exit status: 0)

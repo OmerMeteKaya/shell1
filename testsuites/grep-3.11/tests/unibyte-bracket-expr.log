@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t2Kv
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.ZiRG
 + exit 0
 PASS unibyte-bracket-expr (exit status: 0)

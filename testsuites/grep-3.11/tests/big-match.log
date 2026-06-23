@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bnpl
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VIyo
 + exit 0
 PASS big-match (exit status: 0)

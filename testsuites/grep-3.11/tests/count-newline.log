@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.VDpF
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.y0es
 + exit 0
 PASS count-newline (exit status: 0)

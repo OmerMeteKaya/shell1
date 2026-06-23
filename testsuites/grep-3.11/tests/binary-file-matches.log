@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vepa
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.gYyD
 + exit 0
 PASS binary-file-matches (exit status: 0)

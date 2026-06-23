@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.h2bl
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MOOk
 + exit 0
 PASS dfa-infloop (exit status: 0)

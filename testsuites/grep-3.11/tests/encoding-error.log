@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.4hRf
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.0LW2
 + exit 0
 PASS encoding-error (exit status: 0)

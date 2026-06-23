@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.sbEF
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.OJIh
 + exit 0
 PASS inconsistent-range (exit status: 0)

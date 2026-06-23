@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.pF2J
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.fAzT
 + exit 0
 PASS long-pattern-perf (exit status: 0)

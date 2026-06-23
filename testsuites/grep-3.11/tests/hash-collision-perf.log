@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.bVXe
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.znws
 + exit 0
 PASS hash-collision-perf (exit status: 0)

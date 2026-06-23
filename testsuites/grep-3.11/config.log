@@ -860,7 +860,7 @@ configure:9169: $? = 0
 configure:9169: result: yes
 configure:9169: checking for _set_invalid_parameter_handler
 configure:9169: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/cccKbpBi.o: in function `main':
+/usr/bin/ld: /tmp/ccX0Z537.o: in function `main':
 /home/mete/shell/testsuites/grep-3.11/conftest.c:100:(.text.startup+0x5): undefined reference to `_set_invalid_parameter_handler'
 collect2: error: ld returned 1 exit status
 configure:9169: $? = 1
@@ -1011,7 +1011,7 @@ configure:9169: $? = 0
 configure:9169: result: yes
 configure:9169: checking for getexecname
 configure:9169: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/ccuucg4b.o: in function `main':
+/usr/bin/ld: /tmp/cccVgEUD.o: in function `main':
 /home/mete/shell/testsuites/grep-3.11/conftest.c:110:(.text.startup+0x5): undefined reference to `getexecname'
 collect2: error: ld returned 1 exit status
 configure:9169: $? = 1
@@ -1164,7 +1164,7 @@ configure:9169: $? = 0
 configure:9169: result: yes
 configure:9169: checking for mbslen
 configure:9169: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/cc2mYuYT.o: in function `main':
+/usr/bin/ld: /tmp/ccwPdJRH.o: in function `main':
 /home/mete/shell/testsuites/grep-3.11/conftest.c:115:(.text.startup+0x5): undefined reference to `mbslen'
 collect2: error: ld returned 1 exit status
 configure:9169: $? = 1
@@ -1372,7 +1372,7 @@ configure:9169: $? = 0
 configure:9169: result: yes
 configure:9169: checking for vasnprintf
 configure:9169: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/ccc5BUJv.o: in function `main':
+/usr/bin/ld: /tmp/ccFa8fCf.o: in function `main':
 /home/mete/shell/testsuites/grep-3.11/conftest.c:134:(.text.startup+0x5): undefined reference to `vasnprintf'
 collect2: error: ld returned 1 exit status
 configure:9169: $? = 1
@@ -6190,7 +6190,7 @@ configure:26925: checking for Solaris 11.4 locale system
 configure:26962: result: no
 configure:26975: checking for getlocalename_l
 configure:26975: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/ccsV7oxj.o: in function `main':
+/usr/bin/ld: /tmp/ccwW3xHX.o: in function `main':
 /home/mete/shell/testsuites/grep-3.11/conftest.c:216:(.text.startup+0x5): undefined reference to `getlocalename_l'
 collect2: error: ld returned 1 exit status
 configure:26975: $? = 1
@@ -9317,7 +9317,7 @@ configure:33982: result: yes
 configure:34029: checking for getprogname
 configure:34066: checking for getprogname
 configure:34066: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/ccye4Hgf.o: in function `main':
+/usr/bin/ld: /tmp/ccTS7jLc.o: in function `main':
 /home/mete/shell/testsuites/grep-3.11/conftest.c:288:(.text.startup+0x5): undefined reference to `getprogname'
 collect2: error: ld returned 1 exit status
 configure:34066: $? = 1

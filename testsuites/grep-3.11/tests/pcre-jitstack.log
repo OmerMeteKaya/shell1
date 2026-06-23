@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.qKsq
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.JQ8A
 + exit 0
 PASS pcre-jitstack (exit status: 0)

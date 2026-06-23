@@ -560,6 +560,10 @@ fn run_in_background(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecCont
         return 1;
     }
     if pid == 0 {
+        // Child: setup process group
+        // SAFETY: setpgid in child before exec
+        unsafe { libc::setpgid(0, 0); }
+
         crate::shell::signals::reset_signals_for_child();
         // Apply redirections
         // Redirect stdin to /dev/null for background jobs
@@ -579,8 +583,13 @@ fn run_in_background(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecCont
         unsafe { libc::_exit(127); }
     }
 
-    // Parent
+    // Parent: set process group and record job
+    // SAFETY: setpgid to ensure process group
+    unsafe {
+        let _ = libc::setpgid(pid, pid);
+    }
     let jid = crate::shell::jobs::jobs().add(pid, argv.join(" "));
+    crate::shell::jobs::jobs().set_pgid(pid, pid);
     vars.set_raw("!", pid.to_string(), 0);
     let _ = jid;
     0
@@ -821,6 +830,24 @@ fn execute_select(var: &str, words: &[Token], body: &[CmdNode], ctx: &mut ExecCo
     last_status
 }
 
+fn handle_job_stopped(pgid: i32, shell_pgid: i32) {
+    let mut jobs_lock = crate::shell::jobs::jobs();
+    if let Some(job) = jobs_lock.jobs.values_mut().find(|j| j.pgid == pgid) {
+        job.status = crate::shell::jobs::JobStatus::Stopped;
+        let job_id = job.id;
+        let job_cmd = job.cmd.clone();
+        eprintln!("\n[{}]+  Stopped                 {}", job_id, job_cmd);
+    }
+    drop(jobs_lock);
+
+    // Reclaim terminal for shell
+    if shell_pgid > 0 {
+        crate::shell::signals::G_FOREGROUND_PID.store(-1, std::sync::atomic::Ordering::SeqCst);
+        // SAFETY: tcsetpgrp to reclaim terminal
+        unsafe { let _ = libc::tcsetpgrp(0, shell_pgid); }
+    }
+}
+
 fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], background: bool,
                     ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
     if cmds.is_empty() { return 0; }
@@ -842,6 +869,7 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
     }
 
     let mut pids: Vec<i32> = Vec::new();
+    let mut pgid: i32 = -1;
 
     for (i, cmd) in cmds.iter().enumerate() {
         // SAFETY: fork() is a valid syscall
@@ -850,7 +878,17 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
             return 1;
         }
         if pid == 0 {
-            // Child
+            // Child: setup process group
+            if i == 0 {
+                // First child becomes the group leader
+                // SAFETY: setpgid in child before exec
+                unsafe { libc::setpgid(0, 0); }
+            } else if pgid > 0 {
+                // Subsequent children join the group
+                // SAFETY: setpgid in child before exec
+                unsafe { libc::setpgid(0, pgid); }
+            }
+
             crate::shell::signals::reset_signals_for_child();
 
             // Setup stdin from previous pipe
@@ -897,6 +935,11 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
             unsafe { libc::_exit(status) };
         }
         pids.push(pid);
+
+        // Parent: record pgid from first child
+        if i == 0 {
+            pgid = pid;
+        }
     }
 
     // Parent: close all pipe fds
@@ -905,26 +948,66 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
         unsafe { libc::close(p[0]); libc::close(p[1]); }
     }
 
+    if pgid <= 0 {
+        return 1;
+    }
+
+    // Set process group for parent (in case setpgid races in children)
+    // SAFETY: setpgid to ensure the group is set up
+    unsafe {
+        let _ = libc::setpgid(pgid, pgid);
+    }
+
+    if background {
+        // Background job: record in job table and return
+        if let Some(&first_pid) = pids.first() {
+            let job_id = crate::shell::jobs::jobs().add(first_pid, "pipeline".to_string());
+            crate::shell::jobs::jobs().set_pgid(first_pid, pgid);
+            vars.set_raw("!", first_pid.to_string(), 0);
+        }
+        return 0;
+    }
+
+    // Foreground job: only manage terminal control if at top-level (not nested in a subshell)
+    let shell_pgid = crate::shell::signals::G_SHELL_PGID.load(std::sync::atomic::Ordering::SeqCst);
+    let should_manage_terminal = !ctx.is_subshell && shell_pgid > 0;
+
+    if should_manage_terminal {
+        // Set foreground pgid so signal handler can forward signals to the job
+        crate::shell::signals::G_FOREGROUND_PID.store(pgid, std::sync::atomic::Ordering::SeqCst);
+        // SAFETY: tcsetpgrp to give terminal control
+        unsafe { let _ = libc::tcsetpgrp(0, pgid); }
+    }
+
     // Wait for all children
     let mut last_status = 0;
     for pid in &pids {
-        let mut wstatus = 0;
-        // SAFETY: waitpid with valid pid
-        if unsafe { libc::waitpid(*pid, &mut wstatus, 0) } > 0 {
-            if libc::WIFEXITED(wstatus) {
-                last_status = libc::WEXITSTATUS(wstatus);
-            } else if libc::WIFSIGNALED(wstatus) {
-                last_status = 128 + libc::WTERMSIG(wstatus);
+        loop {
+            let mut wstatus = 0;
+            // SAFETY: waitpid with valid pid, WUNTRACED to detect stops
+            if unsafe { libc::waitpid(*pid, &mut wstatus, libc::WUNTRACED) } > 0 {
+                if libc::WIFEXITED(wstatus) {
+                    last_status = libc::WEXITSTATUS(wstatus);
+                    break;
+                } else if libc::WIFSIGNALED(wstatus) {
+                    last_status = 128 + libc::WTERMSIG(wstatus);
+                    break;
+                } else if libc::WIFSTOPPED(wstatus) {
+                    // Job is stopped - mark it as such and return control to shell
+                    handle_job_stopped(pgid, shell_pgid);
+                    return 128 + libc::WSTOPSIG(wstatus);
+                }
+            } else {
+                break;
             }
         }
     }
 
-    if background {
-        if let Some(&last_pid) = pids.last() {
-            crate::shell::jobs::jobs().add(last_pid, "pipeline".to_string());
-            vars.set_raw("!", last_pid.to_string(), 0);
-        }
-        return 0;
+    // Reclaim terminal for shell and clear foreground pgid (only if we managed it)
+    if should_manage_terminal {
+        crate::shell::signals::G_FOREGROUND_PID.store(-1, std::sync::atomic::Ordering::SeqCst);
+        // SAFETY: tcsetpgrp to reclaim terminal
+        unsafe { let _ = libc::tcsetpgrp(0, shell_pgid); }
     }
 
     last_status
@@ -1094,6 +1177,18 @@ fn run_external(argv: &[String], assigns: &[(String, String)], redirs: &[FdRedir
     if pid < 0 { return 1; }
 
     if pid == 0 {
+        // Child: setup process group, but only if at top level (not in a pipeline)
+        // Check if current pgid equals shell's pgid (indicates top-level execution)
+        // If in a pipeline, keep inherited pgid from pipeline stage
+        let current_pgid = unsafe { libc::getpgrp() };
+        let shell_pgid = crate::shell::signals::G_SHELL_PGID.load(std::sync::atomic::Ordering::SeqCst);
+        if current_pgid == shell_pgid {
+            // At top level: create own process group
+            // SAFETY: setpgid in child before exec
+            unsafe { libc::setpgid(0, 0); }
+        }
+        // Otherwise in a pipeline: keep inherited pgid from pipeline stage
+
         crate::shell::signals::reset_signals_for_child();
         // Apply redirections in child
         for redir in redirs {
@@ -1104,7 +1199,18 @@ fn run_external(argv: &[String], assigns: &[(String, String)], redirs: &[FdRedir
         unsafe { libc::_exit(127) };
     }
 
-    // Parent: wait
+    // Parent: ensure process group is set up (for top-level commands)
+    // SAFETY: setpgid to ensure process group
+    let current_pgid = unsafe { libc::getpgrp() };
+    let shell_pgid = crate::shell::signals::G_SHELL_PGID.load(std::sync::atomic::Ordering::SeqCst);
+    if current_pgid == shell_pgid {
+        // At top level: set up the child's process group
+        unsafe {
+            let _ = libc::setpgid(pid, pid);
+        }
+    }
+
+    // Store pgid for signal handling
     crate::shell::signals::G_FOREGROUND_PID.store(pid, std::sync::atomic::Ordering::SeqCst);
     let mut wstatus = 0;
     // SAFETY: waitpid with valid pid
@@ -1347,6 +1453,8 @@ fn try_builtin(name: &str, args: &[String], redirs: &[FdRedir], ctx: &mut ExecCo
         "hash"      => Some(builtin_hash(args, redirs, ctx, vars)),
         "wait"      => Some(builtin_wait(args, vars)),
         "jobs"      => Some(builtin_jobs(args, redirs, ctx, vars)),
+        "bg"        => Some(builtin_bg(args, redirs, ctx, vars)),
+        "fg"        => Some(builtin_fg(args, redirs, ctx, vars)),
         "kill"      => Some(builtin_kill(args)),
         "trap"      => Some(builtin_trap(args, ctx, vars)),
         "umask"     => Some(builtin_umask(args, redirs, ctx, vars)),

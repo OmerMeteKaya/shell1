@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.HlUe
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rqSI
 + exit 0
 PASS dfa-heap-overrun (exit status: 0)

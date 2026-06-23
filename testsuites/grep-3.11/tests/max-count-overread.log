@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.v05K
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.aHvS
 + exit 0
 PASS max-count-overread (exit status: 0)

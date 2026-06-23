@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.rNQB
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.miPQ
 + exit 0
 PASS utf8-bracket (exit status: 0)

@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.lEt1
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.Omsv
 + exit 0
 PASS backslash-s-vs-invalid-multibyte (exit status: 0)

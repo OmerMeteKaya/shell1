@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6sVQ
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.6biF
 + exit 0
 PASS dfa-coverage (exit status: 0)

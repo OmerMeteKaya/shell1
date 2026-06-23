@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.E9O5
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.KSZ1
 + exit 0
 PASS turkish-eyes (exit status: 0)

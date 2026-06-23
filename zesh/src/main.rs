@@ -135,6 +135,7 @@ fn main() {
                 eprintln!("zesh: -n cannot be used in interactive mode");
                 std::process::exit(1);
             }
+            shell::signals::init_shell_pgid();
             run_interactive(&mut ctx, &mut vars, start_time);
         } else {
             // Non-interactive stdin: read all of stdin and execute as a script

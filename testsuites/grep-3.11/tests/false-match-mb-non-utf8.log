@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.avEr
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.QUEm
 + exit 0
 PASS false-match-mb-non-utf8 (exit status: 0)

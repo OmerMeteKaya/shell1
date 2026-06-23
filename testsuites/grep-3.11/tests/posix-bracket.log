@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.vbxI
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.t3NW
 + exit 0
 PASS posix-bracket (exit status: 0)

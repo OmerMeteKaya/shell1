@@ -11,18 +11,18 @@
 ++ destdir_slash_=/home/mete/shell/testsuites/grep-3.11/tests/
 ++ case $template_ in
 +++ unset TMPDIR
-++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
+++ d=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
 ++ case $d in
 ++ :
-++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
-+++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
-++ perms='drwx------ 2 4096 Jun 23 13:39 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ'
+++ test -d /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
++++ ls -dgo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
+++ perms='drwx------ 2 4096 Jun 23 16:27 /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn'
 ++ case $perms in
 ++ :
-++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
+++ echo /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
 ++ return
-+ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
-+ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
++ test_dir_=/home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
++ cd /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
 + case $srcdir in
 + srcdir=../.
 + builddir=..
@@ -150,7 +150,7 @@
 + :
 + test '' = yes
 + cd /home/mete/shell/testsuites/grep-3.11/tests
-+ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
-+ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MiNZ
++ chmod -R u+rwx /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
++ rm -rf /home/mete/shell/testsuites/grep-3.11/tests/gt-init.sh.MoYn
 + exit 0
 PASS backslash-s-and-repetition-operators (exit status: 0)
