@@ -94,30 +94,31 @@ impl VarStore {
     }
 
     pub fn set_raw(&mut self, name: &str, value: String, attrs: u32) {
-        // Check if var is local in any non-global scope
+        // Check if var is local in the CURRENT innermost scope only
         let scope_count = self.scopes.len();
         if scope_count > 1 {
-            // Check if there's a local binding in current function scope
-            for i in (1..scope_count).rev() {
-                if let Some(v) = self.scopes[i].vars.get(name) {
-                    let existing_attrs = v.attrs;
-                    if existing_attrs & ATTR_LOCAL != 0 || attrs & ATTR_LOCAL != 0 {
-                        let final_attrs = existing_attrs | attrs;
-                        let v = self.scopes[i].vars.get_mut(name).unwrap();
-                        v.value = value;
-                        v.attrs = final_attrs;
-                        return;
-                    }
+            let current_scope_idx = scope_count - 1;
+            // Check if there's already a local binding in the current scope
+            if let Some(v) = self.scopes[current_scope_idx].vars.get(name) {
+                let existing_attrs = v.attrs;
+                if existing_attrs & ATTR_LOCAL != 0 || attrs & ATTR_LOCAL != 0 {
+                    let final_attrs = existing_attrs | attrs;
+                    let v = self.scopes[current_scope_idx].vars.get_mut(name).unwrap();
+                    v.value = value;
+                    v.attrs = final_attrs;
+                    return;
                 }
             }
         }
-        // Set in global or innermost scope depending on context
+        // Set in global or function-local scope depending on context
         let idx = if scope_count > 1 {
-            // Check if global scope has it
-            if self.scopes[0].vars.contains_key(name) && attrs & ATTR_LOCAL == 0 {
-                0
-            } else {
+            if attrs & ATTR_LOCAL != 0 {
+                // Explicit local declaration: use innermost (function) scope
                 scope_count - 1
+            } else {
+                // Non-local assignment: always use global scope (bash behavior —
+                // variables without `local` are global even when set inside functions)
+                0
             }
         } else {
             0

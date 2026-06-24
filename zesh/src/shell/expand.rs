@@ -638,6 +638,88 @@ pub fn expand_string(s: &str, vars: &crate::shell::vars::VarStore, script_file: 
     result
 }
 
+pub fn expand_heredoc_body(s: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> String {
+    let depth_exceeded = EXPAND_DEPTH.with(|d| {
+        let mut depth = d.borrow_mut();
+        if *depth >= MAX_EXPAND_DEPTH {
+            return true;
+        }
+        *depth += 1;
+        false
+    });
+    if depth_exceeded {
+        return String::new();
+    }
+
+    let result = expand_heredoc_body_inner(s, vars, script_file);
+
+    EXPAND_DEPTH.with(|d| {
+        *d.borrow_mut() -= 1;
+    });
+    result
+}
+
+fn expand_heredoc_body_inner(s: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::new();
+    let mut i = 0;
+
+    while i < chars.len() {
+        match chars[i] {
+            '"' => {
+                // In heredoc body, quotes are literal characters, not delimiters.
+                // Just add them as-is.
+                result.push('"');
+                i += 1;
+            }
+            '\\' => {
+                i += 1;
+                if i < chars.len() {
+                    match chars[i] {
+                        '$' | '`' | '\\' | '"' | '\n' => {
+                            // These are escape sequences in a heredoc body with active expansion
+                            if chars[i] != '\n' {
+                                result.push(chars[i]);
+                            }
+                            i += 1;
+                        }
+                        _ => {
+                            // Other backslashes are literal
+                            result.push('\\');
+                        }
+                    }
+                }
+            }
+            '$' => {
+                let (expanded, consumed) = expand_dollar(&chars, i, vars, script_file);
+                result.push_str(&expanded);
+                i += consumed;
+            }
+            '`' => {
+                let (expanded, consumed) = expand_backtick(&chars, i, vars, script_file);
+                result.push_str(&expanded);
+                i += consumed;
+            }
+            '~' => {
+                // Tilde expansion at start or after :
+                let tilde_result = expand_tilde(&chars, i, vars);
+                result.push_str(&tilde_result.0);
+                i += tilde_result.1;
+            }
+            '\'' => {
+                // In heredoc body, single quotes are literal characters, not delimiters.
+                result.push('\'');
+                i += 1;
+            }
+            c => {
+                result.push(c);
+                i += 1;
+            }
+        }
+    }
+    result
+}
+
 fn expand_string_inner(s: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> String {
     let chars: Vec<char> = s.chars().collect();
     let mut result = String::new();

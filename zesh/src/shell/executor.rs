@@ -6,7 +6,7 @@ use std::os::unix::io::RawFd;
 
 use crate::shell::types::*;
 use crate::shell::vars::{VarStore, ATTR_EXPORT, ATTR_LOCAL};
-use crate::shell::expand::{expand_token, expand_string, eval_arith_expr_with_vars};
+use crate::shell::expand::{expand_token, expand_string, expand_heredoc_body, eval_arith_expr_with_vars};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopControl {
@@ -96,11 +96,35 @@ fn clone_vars_for_subshell(vars: &VarStore) -> VarStore {
 
 pub fn execute_list(nodes: &[CmdNode], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
     let mut i = 0;
+    let mut should_skip_next = false;
+    let mut status = 0;
+
     while i < nodes.len() {
         let node = &nodes[i];
 
-        // Handle && and ||
-        let status = execute_node(node, ctx, vars);
+        // If we should skip this node (due to previous && or || operator),
+        // skip execution but still process this node's operator
+        if should_skip_next {
+            should_skip_next = false;
+            match &node.op {
+                NodeOp::And => {
+                    if status != 0 {
+                        should_skip_next = true;
+                    }
+                }
+                NodeOp::Or => {
+                    if status == 0 {
+                        should_skip_next = true;
+                    }
+                }
+                _ => {}
+            }
+            i += 1;
+            continue;
+        }
+
+        // Execute the node
+        status = execute_node(node, ctx, vars);
         ctx.exit_status = status;
         vars.set_raw("?", status.to_string(), 0);
 
@@ -108,27 +132,18 @@ pub fn execute_list(nodes: &[CmdNode], ctx: &mut ExecContext, vars: &mut VarStor
             return status;
         }
 
+        // Handle && and || operators
         match &node.op {
             NodeOp::And => {
                 if status != 0 {
-                    // Short-circuit: skip remaining nodes in this &&/|| chain
-                    i += 1;
-                    while i < nodes.len() && matches!(nodes[i].op, NodeOp::And | NodeOp::Or) {
-                        i += 1;
-                    }
-                    i += 1; // skip the final End/Semi chain node
-                    continue;
+                    // AND fails: skip next command but continue evaluating chain
+                    should_skip_next = true;
                 }
             }
             NodeOp::Or => {
                 if status == 0 {
-                    // Short-circuit: skip remaining nodes in this &&/|| chain
-                    i += 1;
-                    while i < nodes.len() && matches!(nodes[i].op, NodeOp::And | NodeOp::Or) {
-                        i += 1;
-                    }
-                    i += 1; // skip the final End/Semi chain node
-                    continue;
+                    // OR succeeds: skip next command but continue evaluating chain
+                    should_skip_next = true;
                 }
             }
             NodeOp::End | NodeOp::Semi => {}
@@ -357,7 +372,7 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
         let expanded = if let Some(literal) = content.strip_prefix("\x00NEXPAND\x00") {
             literal.to_string()
         } else {
-            expand_string(content, vars, &ctx.script_file)
+            expand_heredoc_body(content, vars, &ctx.script_file)
         };
         let mut pipe_fds = [0i32; 2];
         // SAFETY: pipe() with valid ptr
@@ -444,7 +459,7 @@ fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext
 
     // Expand assignments
     let mut local_assigns: Vec<(String, String)> = Vec::new();
-    for (k, v) in &cmd.assigns {
+    for (k, v, is_append) in &cmd.assigns {
         let expanded_v = expand_string(v, vars, &ctx.script_file);
         // Apply any := assignments from expansion
         for (an, av) in crate::shell::expand::take_param_assigns() {
@@ -455,7 +470,13 @@ fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext
             restore_redirections(early_saved);
             return 1;
         }
-        local_assigns.push((k.clone(), expanded_v));
+        let final_v = if *is_append {
+            let current = vars.get_str(k).unwrap_or_default();
+            format!("{}{}", current, expanded_v)
+        } else {
+            expanded_v
+        };
+        local_assigns.push((k.clone(), final_v));
     }
 
     // Expand words
@@ -605,11 +626,11 @@ fn call_function(name: &str, args: &[String], body: &[CmdNode], source_file: Str
     // Push scope for locals
     vars.push_scope();
 
-    // Set $1, $2, ... in scope
+    // Set $1, $2, ... in scope (as local to ensure proper restoration)
     for (i, arg) in args.iter().enumerate() {
-        vars.set_raw(&(i+1).to_string(), arg.clone(), 0);
+        vars.set_raw(&(i+1).to_string(), arg.clone(), ATTR_LOCAL);
     }
-    vars.set_raw("#", args.len().to_string(), 0);
+    vars.set_raw("#", args.len().to_string(), ATTR_LOCAL);
 
     // Push funcname stack
     ctx.funcname.push(name.to_string());

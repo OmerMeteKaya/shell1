@@ -852,10 +852,14 @@ impl Parser {
                     // Check if it's an assignment (VAR=val) and no words yet
                     if words.is_empty() && is_assignment(&tok.value) {
                         let eq = tok.value.find('=').unwrap();
-                        let k = tok.value[..eq].to_string();
-                        let v = tok.value[eq+1..].to_string();
-                        // Check for array literal: NAME=(elem1 elem2 ...)
-                        if v.is_empty() && self.peek_kind() == &TokKind::LParen {
+                        let is_append = eq > 0 && tok.value.as_bytes()[eq - 1] == b'+';
+                        let (k, v) = if is_append {
+                            (tok.value[..eq - 1].to_string(), tok.value[eq + 1..].to_string())
+                        } else {
+                            (tok.value[..eq].to_string(), tok.value[eq + 1..].to_string())
+                        };
+                        // Check for array literal: NAME=(elem1 elem2 ...) — only for plain =
+                        if !is_append && v.is_empty() && self.peek_kind() == &TokKind::LParen {
                             self.advance(); // consume '('
                             let mut elems = Vec::new();
                             loop {
@@ -874,7 +878,7 @@ impl Parser {
                             }
                             array_assigns.push((k, elems));
                         } else {
-                            assigns.push((k, v));
+                            assigns.push((k, v, is_append));
                         }
                     } else {
                         words.push(tok);
@@ -1222,17 +1226,19 @@ fn is_redir_tok(k: &TokKind) -> bool {
 }
 
 fn is_assignment(s: &str) -> bool {
-    // VAR=val: VAR must be valid identifier
-    if let Some(eq) = s.find('=') {
-        let name = &s[..eq];
-        if name.is_empty() { return false; }
-        let mut chars = name.chars();
-        let first = chars.next().unwrap();
-        if !first.is_alphabetic() && first != '_' { return false; }
-        chars.all(|c| c.is_alphanumeric() || c == '_')
+    // VAR=val or VAR+=val: VAR must be valid identifier
+    let Some(eq) = s.find('=') else { return false; };
+    // If char before '=' is '+', name is everything before the '+'
+    let name = if eq > 0 && s.as_bytes()[eq - 1] == b'+' {
+        &s[..eq - 1]
     } else {
-        false
-    }
+        &s[..eq]
+    };
+    if name.is_empty() { return false; }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_alphabetic() && first != '_' { return false; }
+    chars.all(|c| c.is_alphanumeric() || c == '_')
 }
 
 pub fn parse(tokens: Vec<Token>) -> Vec<CmdNode> {

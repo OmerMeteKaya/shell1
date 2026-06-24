@@ -72,7 +72,7 @@ pub struct FdRedir {
 #[derive(Debug, Clone)]
 pub struct Command {
     pub words: Vec<Token>,         // argv[0..] (after expansion)
-    pub assigns: Vec<(String, String)>, // VAR=val before command
+    pub assigns: Vec<(String, String, bool)>, // VAR=val / VAR+=val before command (bool = is_append)
     pub array_assigns: Vec<(String, Vec<String>)>, // ARR=(elem1 elem2...)
     pub redirs: Vec<FdRedir>,
     pub heredoc_content: Option<String>,

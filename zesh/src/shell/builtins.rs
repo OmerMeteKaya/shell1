@@ -310,21 +310,59 @@ fn printf_format(fmt: &str, args: &[String]) -> (String, usize) {
 }
 
 pub fn builtin_cd(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
-    let target = if args.is_empty() {
+    let mut physical = false;
+    let mut arg_idx = 0;
+
+    while arg_idx < args.len() {
+        let arg = &args[arg_idx];
+        if arg == "-L" {
+            physical = false;
+            arg_idx += 1;
+        } else if arg == "-P" {
+            physical = true;
+            arg_idx += 1;
+        } else if arg == "-" || !arg.starts_with('-') {
+            break;
+        } else {
+            eprintln!("zesh: cd: {}: invalid option", arg);
+            return 1;
+        }
+    }
+
+    let target = if arg_idx >= args.len() {
         vars.get_str("HOME").unwrap_or_else(|| "/".to_string())
-    } else if args[0] == "-" {
+    } else if args[arg_idx] == "-" {
         vars.get_str("OLDPWD").unwrap_or_else(|| ctx.cwd.to_string_lossy().into_owned())
     } else {
-        args[0].clone()
+        args[arg_idx].clone()
     };
 
     let old_pwd = ctx.cwd.to_string_lossy().into_owned();
 
-    match std::env::set_current_dir(&target) {
+    let resolved_target = if physical {
+        match std::fs::canonicalize(&target) {
+            Ok(path) => path,
+            Err(e) => {
+                eprintln!("zesh: cd: {}: {}", target, e);
+                return 1;
+            }
+        }
+    } else {
+        std::path::PathBuf::from(&target)
+    };
+
+    match std::env::set_current_dir(&resolved_target) {
         Ok(()) => {
-            ctx.cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"));
+            // For -P mode, use the canonicalized path. For -L mode, use the target as typed.
+            let new_pwd = if physical {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/"))
+            } else {
+                std::path::PathBuf::from(&target)
+            };
+
+            ctx.cwd = new_pwd.clone();
             vars.set_raw("OLDPWD", old_pwd, 0);
-            vars.set_raw("PWD", ctx.cwd.to_string_lossy().into_owned(), 0);
+            vars.set_raw("PWD", new_pwd.to_string_lossy().into_owned(), 0);
             0
         }
         Err(e) => {
