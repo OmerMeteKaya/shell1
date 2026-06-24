@@ -1,12 +1,14 @@
 // Execution engine
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::os::unix::io::RawFd;
+use std::path::PathBuf;
 
+use crate::shell::expand::{
+    eval_arith_expr_with_vars, expand_heredoc_body, expand_string, expand_token,
+};
 use crate::shell::types::*;
 use crate::shell::vars::{VarStore, ATTR_EXPORT, ATTR_LOCAL};
-use crate::shell::expand::{expand_token, expand_string, expand_heredoc_body, eval_arith_expr_with_vars};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LoopControl {
@@ -31,8 +33,9 @@ pub struct ExecContext {
     pub lineno: u32,
     pub funcname: Vec<String>,
     pub funcname_lineno: Vec<u32>,
-    pub pos_params: Vec<String>,   // $1, $2, ...
-    pub getopts_idx: usize,        // internal getopts state
+    pub pos_params: Vec<String>, // $1, $2, ...
+    pub getopts_idx: usize,      // internal getopts state
+    pub call_depth: usize,       // recursion depth for function calls
 }
 
 impl ExecContext {
@@ -55,6 +58,7 @@ impl ExecContext {
             funcname_lineno: Vec::new(),
             pos_params: Vec::new(),
             getopts_idx: 0,
+            call_depth: 0,
         }
     }
 
@@ -64,6 +68,8 @@ impl ExecContext {
         ctx
     }
 }
+
+const MAX_CALL_DEPTH: usize = 2000;
 
 // Execute list with borrowed vars (for command substitution context)
 pub fn execute_list_with_vars(nodes: &[CmdNode], ctx: &mut ExecContext, vars: &VarStore) -> i32 {
@@ -169,13 +175,23 @@ fn execute_node(node: &CmdNode, ctx: &mut ExecContext, vars: &mut VarStore) -> i
     let status = execute_compound(&node.kind, &node.redirs, node.background, ctx, vars);
 
     if node.negate {
-        if status == 0 { 1 } else { 0 }
+        if status == 0 {
+            1
+        } else {
+            0
+        }
     } else {
         status
     }
 }
 
-fn execute_compound(kind: &CompoundKind, redirs: &[FdRedir], background: bool, ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_compound(
+    kind: &CompoundKind,
+    redirs: &[FdRedir],
+    background: bool,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     match kind {
         CompoundKind::Simple(cmd) => {
             if background {
@@ -189,38 +205,31 @@ fn execute_compound(kind: &CompoundKind, redirs: &[FdRedir], background: bool, c
         }
         CompoundKind::Brace(body) => {
             // { list } with possible extra redirections
-            with_redirections(redirs, ctx, vars, |ctx, vars| {
-                execute_list(body, ctx, vars)
-            })
+            with_redirections(redirs, ctx, vars, |ctx, vars| execute_list(body, ctx, vars))
         }
-        CompoundKind::Subshell(body) => {
-            execute_subshell(body, redirs, background, ctx, vars)
-        }
-        CompoundKind::If { cond, then_part, elif_parts, else_part } => {
-            with_redirections(redirs, ctx, vars, |ctx, vars| {
-                execute_if(cond, then_part, elif_parts, else_part.as_deref(), ctx, vars)
-            })
-        }
-        CompoundKind::While { cond, body } => {
-            with_redirections(redirs, ctx, vars, |ctx, vars| {
-                execute_while(cond, body, false, ctx, vars)
-            })
-        }
-        CompoundKind::Until { cond, body } => {
-            with_redirections(redirs, ctx, vars, |ctx, vars| {
-                execute_while(cond, body, true, ctx, vars)
-            })
-        }
+        CompoundKind::Subshell(body) => execute_subshell(body, redirs, background, ctx, vars),
+        CompoundKind::If {
+            cond,
+            then_part,
+            elif_parts,
+            else_part,
+        } => with_redirections(redirs, ctx, vars, |ctx, vars| {
+            execute_if(cond, then_part, elif_parts, else_part.as_deref(), ctx, vars)
+        }),
+        CompoundKind::While { cond, body } => with_redirections(redirs, ctx, vars, |ctx, vars| {
+            execute_while(cond, body, false, ctx, vars)
+        }),
+        CompoundKind::Until { cond, body } => with_redirections(redirs, ctx, vars, |ctx, vars| {
+            execute_while(cond, body, true, ctx, vars)
+        }),
         CompoundKind::For { var, words, body } => {
             with_redirections(redirs, ctx, vars, |ctx, vars| {
                 execute_for(var, words, body, ctx, vars)
             })
         }
-        CompoundKind::Case { word, arms } => {
-            with_redirections(redirs, ctx, vars, |ctx, vars| {
-                execute_case(word, arms, ctx, vars)
-            })
-        }
+        CompoundKind::Case { word, arms } => with_redirections(redirs, ctx, vars, |ctx, vars| {
+            execute_case(word, arms, ctx, vars)
+        }),
         CompoundKind::Select { var, words, body } => {
             with_redirections(redirs, ctx, vars, |ctx, vars| {
                 execute_select(var, words, body, ctx, vars)
@@ -228,25 +237,25 @@ fn execute_compound(kind: &CompoundKind, redirs: &[FdRedir], background: bool, c
         }
         CompoundKind::FuncDef { name, body } => {
             // Register function
-            vars.functions.insert(name.clone(), crate::shell::vars::ShellFunction {
-                name: name.clone(),
-                body: body.clone(),
-                defined_at_line: ctx.lineno,
-                source_file: ctx.script_file.clone(),
-            });
+            vars.functions.insert(
+                name.clone(),
+                crate::shell::vars::ShellFunction {
+                    name: name.clone(),
+                    body: body.clone(),
+                    defined_at_line: ctx.lineno,
+                    source_file: ctx.script_file.clone(),
+                },
+            );
             0
         }
-        CompoundKind::Time(body) => {
-            execute_time(body, redirs, ctx, vars)
-        }
-        CompoundKind::Coproc { name, body } => {
-            execute_coproc(name, body, ctx, vars)
-        }
+        CompoundKind::Time(body) => execute_time(body, redirs, ctx, vars),
+        CompoundKind::Coproc { name, body } => execute_coproc(name, body, ctx, vars),
     }
 }
 
 fn with_redirections<F>(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore, f: F) -> i32
-where F: FnOnce(&mut ExecContext, &mut VarStore) -> i32
+where
+    F: FnOnce(&mut ExecContext, &mut VarStore) -> i32,
 {
     if redirs.is_empty() {
         return f(ctx, vars);
@@ -255,7 +264,10 @@ where F: FnOnce(&mut ExecContext, &mut VarStore) -> i32
     // Save and apply redirections; abort if any redirect fails
     let saved = match apply_redirections_save(redirs, ctx, vars) {
         Ok(s) => s,
-        Err(partial) => { restore_redirections(partial); return 1; }
+        Err(partial) => {
+            restore_redirections(partial);
+            return 1;
+        }
     };
     let status = f(ctx, vars);
     restore_redirections(saved);
@@ -270,7 +282,11 @@ pub struct SavedFd {
 // Returns Ok(saved) on success, or Err(partial_saved) on the first failure.
 // Partial saved contains any redirects that were applied before the failure
 // and must be restored by the caller.
-fn apply_redirections_save(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> Result<Vec<SavedFd>, Vec<SavedFd>> {
+fn apply_redirections_save(
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> Result<Vec<SavedFd>, Vec<SavedFd>> {
     let mut saved = Vec::new();
     for redir in redirs {
         match apply_one_redir_save(redir, ctx, vars) {
@@ -281,7 +297,11 @@ fn apply_redirections_save(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut
     Ok(saved)
 }
 
-fn apply_one_redir_save(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarStore) -> Option<SavedFd> {
+fn apply_one_redir_save(
+    redir: &FdRedir,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> Option<SavedFd> {
     let src_fd = redir.src_fd;
 
     // Save original fd
@@ -292,17 +312,25 @@ fn apply_one_redir_save(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSt
     if !result {
         if saved_fd >= 0 {
             // SAFETY: close valid fd
-            unsafe { libc::close(saved_fd); }
+            unsafe {
+                libc::close(saved_fd);
+            }
         }
         return None;
     }
 
     if saved_fd >= 0 {
-        Some(SavedFd { orig_fd: src_fd, saved_fd })
+        Some(SavedFd {
+            orig_fd: src_fd,
+            saved_fd,
+        })
     } else {
         // src_fd was not open before; redirect succeeded but there's no prior fd to dup back.
         // Use saved_fd = -1 as a sentinel: restore_redirections will close orig_fd instead of dup2.
-        Some(SavedFd { orig_fd: src_fd, saved_fd: -1 })
+        Some(SavedFd {
+            orig_fd: src_fd,
+            saved_fd: -1,
+        })
     }
 }
 
@@ -312,7 +340,9 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
     if redir.dst_fd == -1 {
         // Close
         // SAFETY: close valid fd
-        unsafe { libc::close(src_fd); }
+        unsafe {
+            libc::close(src_fd);
+        }
         return true;
     }
 
@@ -322,12 +352,16 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
             let expanded = expand_string(word, vars, &ctx.script_file);
             if expanded == "-" {
                 // SAFETY: close valid fd
-                unsafe { libc::close(src_fd); }
+                unsafe {
+                    libc::close(src_fd);
+                }
                 return true;
             }
             if let Ok(dst) = expanded.parse::<i32>() {
                 // SAFETY: dup2 with valid fds
-                unsafe { libc::dup2(dst, src_fd); }
+                unsafe {
+                    libc::dup2(dst, src_fd);
+                }
                 return true;
             }
         }
@@ -337,7 +371,9 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
     if redir.dst_fd >= 0 {
         // Dup
         // SAFETY: dup2 with valid fds
-        unsafe { libc::dup2(redir.dst_fd, src_fd); }
+        unsafe {
+            libc::dup2(redir.dst_fd, src_fd);
+        }
         return true;
     }
 
@@ -355,7 +391,11 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
             // Write content to write end, then close it
             // SAFETY: write with valid ptr and size
             unsafe {
-                libc::write(pipe_fds[1], content.as_ptr() as *const libc::c_void, content.len());
+                libc::write(
+                    pipe_fds[1],
+                    content.as_ptr() as *const libc::c_void,
+                    content.len(),
+                );
                 libc::close(pipe_fds[1]);
                 if pipe_fds[0] != src_fd {
                     libc::dup2(pipe_fds[0], src_fd);
@@ -381,7 +421,11 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
         }
         // SAFETY: write with valid ptr
         unsafe {
-            libc::write(pipe_fds[1], expanded.as_ptr() as *const libc::c_void, expanded.len());
+            libc::write(
+                pipe_fds[1],
+                expanded.as_ptr() as *const libc::c_void,
+                expanded.len(),
+            );
             libc::close(pipe_fds[1]);
             if pipe_fds[0] != src_fd {
                 libc::dup2(pipe_fds[0], src_fd);
@@ -442,19 +486,32 @@ fn restore_redirections(saved: Vec<SavedFd>) {
     }
 }
 
-fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_simple(
+    cmd: &Command,
+    extra_redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     ctx.lineno = cmd.lineno;
     vars.set_raw("LINENO", cmd.lineno.to_string(), 0);
 
     // Combine cmd.redirs and extra_redirs
-    let all_redirs: Vec<FdRedir> = cmd.redirs.iter().chain(extra_redirs.iter()).cloned().collect();
+    let all_redirs: Vec<FdRedir> = cmd
+        .redirs
+        .iter()
+        .chain(extra_redirs.iter())
+        .cloned()
+        .collect();
 
     // Apply redirections BEFORE word expansion so that ${var:?msg} errors and
     // other expansion side-effects go to the redirected fd (e.g. 2>&1 captures errors).
     // If any redirect target cannot be opened, abort the command immediately (POSIX).
     let early_saved = match apply_redirections_save(&all_redirs, ctx, vars) {
         Ok(s) => s,
-        Err(partial) => { restore_redirections(partial); return 1; }
+        Err(partial) => {
+            restore_redirections(partial);
+            return 1;
+        }
     };
 
     // Expand assignments
@@ -555,15 +612,34 @@ fn execute_simple(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext
         let func_body = vars.functions[&cmd_name].body.clone();
         let func_source = vars.functions[&cmd_name].source_file.clone();
         let func_line = vars.functions[&cmd_name].defined_at_line;
-        return call_function(&cmd_name, &argv[1..], &func_body, func_source, func_line, &all_redirs, ctx, vars);
+        return call_function(
+            &cmd_name,
+            &argv[1..],
+            &func_body,
+            func_source,
+            func_line,
+            &all_redirs,
+            ctx,
+            vars,
+        );
     }
 
     // External command
     run_external(&argv, &local_assigns, &all_redirs, ctx, vars)
 }
 
-fn run_in_background(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
-    let all_redirs: Vec<FdRedir> = cmd.redirs.iter().chain(extra_redirs.iter()).cloned().collect();
+fn run_in_background(
+    cmd: &Command,
+    extra_redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
+    let all_redirs: Vec<FdRedir> = cmd
+        .redirs
+        .iter()
+        .chain(extra_redirs.iter())
+        .cloned()
+        .collect();
 
     let mut argv: Vec<String> = Vec::new();
     for tok in &cmd.words {
@@ -583,14 +659,20 @@ fn run_in_background(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecCont
     if pid == 0 {
         // Child: setup process group
         // SAFETY: setpgid in child before exec
-        unsafe { libc::setpgid(0, 0); }
+        unsafe {
+            libc::setpgid(0, 0);
+        }
 
         crate::shell::signals::reset_signals_for_child();
         // Apply redirections
         // Redirect stdin to /dev/null for background jobs
         // SAFETY: open and dup2 with valid args
         unsafe {
-            let devnull = libc::open(b"/dev/null\0".as_ptr() as *const libc::c_char, libc::O_RDONLY, 0);
+            let devnull = libc::open(
+                b"/dev/null\0".as_ptr() as *const libc::c_char,
+                libc::O_RDONLY,
+                0,
+            );
             if devnull >= 0 {
                 libc::dup2(devnull, 0);
                 libc::close(devnull);
@@ -601,7 +683,9 @@ fn run_in_background(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecCont
         }
         exec_external(&argv, &[], ctx, vars);
         // SAFETY: _exit is always safe
-        unsafe { libc::_exit(127); }
+        unsafe {
+            libc::_exit(127);
+        }
     }
 
     // Parent: set process group and record job
@@ -616,8 +700,23 @@ fn run_in_background(cmd: &Command, extra_redirs: &[FdRedir], ctx: &mut ExecCont
     0
 }
 
-fn call_function(name: &str, args: &[String], body: &[CmdNode], source_file: String, def_line: u32,
-                 redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn call_function(
+    name: &str,
+    args: &[String],
+    body: &[CmdNode],
+    source_file: String,
+    def_line: u32,
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
+    // Check recursion depth
+    if ctx.call_depth > MAX_CALL_DEPTH {
+        eprintln!("zesh: maximum recursion depth exceeded");
+        return 1;
+    }
+
+    ctx.call_depth += 1;
 
     // Save and set positional parameters
     let saved_pos = ctx.pos_params.clone();
@@ -628,7 +727,7 @@ fn call_function(name: &str, args: &[String], body: &[CmdNode], source_file: Str
 
     // Set $1, $2, ... in scope (as local to ensure proper restoration)
     for (i, arg) in args.iter().enumerate() {
-        vars.set_raw(&(i+1).to_string(), arg.clone(), ATTR_LOCAL);
+        vars.set_raw(&(i + 1).to_string(), arg.clone(), ATTR_LOCAL);
     }
     vars.set_raw("#", args.len().to_string(), ATTR_LOCAL);
 
@@ -639,11 +738,17 @@ fn call_function(name: &str, args: &[String], body: &[CmdNode], source_file: Str
     // Set $FUNCNAME and $BASH_SOURCE
     let fname_stack = ctx.funcname.join(" ");
     vars.set_raw("FUNCNAME", name.to_string(), 0);
-    vars.set_raw("BASH_SOURCE", if source_file.is_empty() { ctx.script_file.clone() } else { source_file.clone() }, 0);
+    vars.set_raw(
+        "BASH_SOURCE",
+        if source_file.is_empty() {
+            ctx.script_file.clone()
+        } else {
+            source_file.clone()
+        },
+        0,
+    );
 
-    let status = with_redirections(redirs, ctx, vars, |ctx, vars| {
-        execute_list(body, ctx, vars)
-    });
+    let status = with_redirections(redirs, ctx, vars, |ctx, vars| execute_list(body, ctx, vars));
 
     // Pop funcname
     ctx.funcname.pop();
@@ -672,11 +777,18 @@ fn call_function(name: &str, args: &[String], body: &[CmdNode], source_file: Str
         status
     };
 
+    ctx.call_depth -= 1;
     final_status
 }
 
-fn execute_if(cond: &[CmdNode], then_part: &[CmdNode], elif_parts: &[(Vec<CmdNode>, Vec<CmdNode>)],
-              else_part: Option<&[CmdNode]>, ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_if(
+    cond: &[CmdNode],
+    then_part: &[CmdNode],
+    elif_parts: &[(Vec<CmdNode>, Vec<CmdNode>)],
+    else_part: Option<&[CmdNode]>,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     let cond_status = execute_list(cond, ctx, vars);
     if cond_status == 0 {
         execute_list(then_part, ctx, vars)
@@ -695,11 +807,21 @@ fn execute_if(cond: &[CmdNode], then_part: &[CmdNode], elif_parts: &[(Vec<CmdNod
     }
 }
 
-fn execute_while(cond: &[CmdNode], body: &[CmdNode], until: bool, ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_while(
+    cond: &[CmdNode],
+    body: &[CmdNode],
+    until: bool,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     let mut last_status = 0;
     loop {
         let cond_status = execute_list(cond, ctx, vars);
-        let should_run = if until { cond_status != 0 } else { cond_status == 0 };
+        let should_run = if until {
+            cond_status != 0
+        } else {
+            cond_status == 0
+        };
 
         if !should_run {
             break;
@@ -727,12 +849,20 @@ fn execute_while(cond: &[CmdNode], body: &[CmdNode], until: bool, ctx: &mut Exec
             LoopControl::None => {}
         }
 
-        if ctx.returning { break; }
+        if ctx.returning {
+            break;
+        }
     }
     last_status
 }
 
-fn execute_for(var: &str, words: &[Token], body: &[CmdNode], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_for(
+    var: &str,
+    words: &[Token],
+    body: &[CmdNode],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     // Expand word list
     let mut items = Vec::new();
     for w in words {
@@ -770,7 +900,9 @@ fn execute_for(var: &str, words: &[Token], body: &[CmdNode], ctx: &mut ExecConte
             LoopControl::None => {}
         }
 
-        if ctx.returning { break; }
+        if ctx.returning {
+            break;
+        }
     }
     last_status
 }
@@ -799,7 +931,13 @@ fn expand_word_single(tok: &Token, vars: &VarStore, script_file: &str) -> String
     parts.join(" ")
 }
 
-fn execute_select(var: &str, words: &[Token], body: &[CmdNode], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_select(
+    var: &str,
+    words: &[Token],
+    body: &[CmdNode],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     // Expand word list
     let mut items: Vec<String> = Vec::new();
     for w in words {
@@ -846,7 +984,9 @@ fn execute_select(var: &str, words: &[Token], body: &[CmdNode], ctx: &mut ExecCo
             }
             LoopControl::None => {}
         }
-        if ctx.returning { break; }
+        if ctx.returning {
+            break;
+        }
     }
     last_status
 }
@@ -865,34 +1005,44 @@ fn handle_job_stopped(pgid: i32, shell_pgid: i32) {
     if shell_pgid > 0 {
         crate::shell::signals::G_FOREGROUND_PID.store(-1, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: tcsetpgrp to reclaim terminal
-        unsafe { let _ = libc::tcsetpgrp(0, shell_pgid); }
+        unsafe {
+            let _ = libc::tcsetpgrp(0, shell_pgid);
+        }
     }
 }
 
-fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], background: bool,
-                    ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
-    if cmds.is_empty() { return 0; }
+fn execute_pipeline(
+    cmds: &[CmdNode],
+    pipe_err: bool,
+    extra_redirs: &[FdRedir],
+    background: bool,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
+    if cmds.is_empty() {
+        return 0;
+    }
     if cmds.len() == 1 {
         return execute_node(&cmds[0], ctx, vars);
     }
 
     let n = cmds.len();
-    let mut pipes: Vec<[RawFd; 2]> = Vec::new();
-
-    // Create pipes
-    for _ in 0..n-1 {
-        let mut fds = [0i32; 2];
-        // SAFETY: pipe() with valid ptr
-        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return 1;
-        }
-        pipes.push(fds);
-    }
-
     let mut pids: Vec<i32> = Vec::new();
     let mut pgid: i32 = -1;
+    let mut prev_pipe: Option<[RawFd; 2]> = None;
 
     for (i, cmd) in cmds.iter().enumerate() {
+        // Create the pipe for this stage (connecting stage i to i+1)
+        let mut current_pipe: Option<[RawFd; 2]> = None;
+        if i < n - 1 {
+            let mut fds = [0i32; 2];
+            // SAFETY: pipe() with valid ptr
+            if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+                return 1;
+            }
+            current_pipe = Some(fds);
+        }
+
         // SAFETY: fork() is a valid syscall
         let pid = unsafe { libc::fork() };
         if pid < 0 {
@@ -903,37 +1053,39 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
             if i == 0 {
                 // First child becomes the group leader
                 // SAFETY: setpgid in child before exec
-                unsafe { libc::setpgid(0, 0); }
+                unsafe {
+                    libc::setpgid(0, 0);
+                }
             } else if pgid > 0 {
                 // Subsequent children join the group
                 // SAFETY: setpgid in child before exec
-                unsafe { libc::setpgid(0, pgid); }
+                unsafe {
+                    libc::setpgid(0, pgid);
+                }
             }
 
             crate::shell::signals::reset_signals_for_child();
 
             // Setup stdin from previous pipe
-            if i > 0 {
+            if let Some(pipe) = prev_pipe {
                 // SAFETY: dup2 with valid fds
                 unsafe {
-                    libc::dup2(pipes[i-1][0], 0);
+                    libc::dup2(pipe[0], 0);
+                    libc::close(pipe[0]);
+                    libc::close(pipe[1]);
                 }
             }
-            // Setup stdout to next pipe
-            if i < n - 1 {
+            // Setup stdout to current pipe
+            if let Some(pipe) = current_pipe {
                 // SAFETY: dup2 with valid fds
                 unsafe {
-                    libc::dup2(pipes[i][1], 1);
+                    libc::dup2(pipe[1], 1);
                     if pipe_err {
-                        libc::dup2(pipes[i][1], 2);
+                        libc::dup2(pipe[1], 2);
                     }
+                    libc::close(pipe[0]);
+                    libc::close(pipe[1]);
                 }
-            }
-
-            // Close all pipe fds
-            for p in &pipes {
-                // SAFETY: close valid fds
-                unsafe { libc::close(p[0]); libc::close(p[1]); }
             }
 
             // Apply extra redirections to last command
@@ -961,12 +1113,27 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
         if i == 0 {
             pgid = pid;
         }
+
+        // Parent: close the previous pipe, now that this child has inherited it
+        if let Some(pipe) = prev_pipe {
+            // SAFETY: close valid fds
+            unsafe {
+                libc::close(pipe[0]);
+                libc::close(pipe[1]);
+            }
+        }
+
+        // Current pipe becomes the previous pipe for the next iteration
+        prev_pipe = current_pipe;
     }
 
-    // Parent: close all pipe fds
-    for p in &pipes {
+    // Parent: close the last pipe if one exists (it's in prev_pipe)
+    if let Some(pipe) = prev_pipe {
         // SAFETY: close valid fds
-        unsafe { libc::close(p[0]); libc::close(p[1]); }
+        unsafe {
+            libc::close(pipe[0]);
+            libc::close(pipe[1]);
+        }
     }
 
     if pgid <= 0 {
@@ -997,7 +1164,9 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
         // Set foreground pgid so signal handler can forward signals to the job
         crate::shell::signals::G_FOREGROUND_PID.store(pgid, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: tcsetpgrp to give terminal control
-        unsafe { let _ = libc::tcsetpgrp(0, pgid); }
+        unsafe {
+            let _ = libc::tcsetpgrp(0, pgid);
+        }
     }
 
     // Wait for all children
@@ -1006,7 +1175,8 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
         loop {
             let mut wstatus = 0;
             // SAFETY: waitpid with valid pid, WUNTRACED to detect stops
-            if unsafe { libc::waitpid(*pid, &mut wstatus, libc::WUNTRACED) } > 0 {
+            let result = unsafe { libc::waitpid(*pid, &mut wstatus, libc::WUNTRACED) };
+            if result > 0 {
                 if libc::WIFEXITED(wstatus) {
                     last_status = libc::WEXITSTATUS(wstatus);
                     break;
@@ -1018,6 +1188,21 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
                     handle_job_stopped(pgid, shell_pgid);
                     return 128 + libc::WSTOPSIG(wstatus);
                 }
+            } else if result < 0 {
+                // Check if it was interrupted by a signal
+                let errno = std::io::Error::last_os_error();
+                if errno.raw_os_error() == Some(libc::EINTR) {
+                    // Interrupted by signal - check for pending signal trap
+                    if crate::shell::signals::check_and_run_trap(vars, &ctx.script_file) {
+                        // Trap was executed, exit with its status
+                        return ctx.exit_status;
+                    }
+                    // Continue waiting for child to finish
+                    continue;
+                } else {
+                    // Other error (child not found, permission denied, etc.)
+                    break;
+                }
             } else {
                 break;
             }
@@ -1028,20 +1213,30 @@ fn execute_pipeline(cmds: &[CmdNode], pipe_err: bool, extra_redirs: &[FdRedir], 
     if should_manage_terminal {
         crate::shell::signals::G_FOREGROUND_PID.store(-1, std::sync::atomic::Ordering::SeqCst);
         // SAFETY: tcsetpgrp to reclaim terminal
-        unsafe { let _ = libc::tcsetpgrp(0, shell_pgid); }
+        unsafe {
+            let _ = libc::tcsetpgrp(0, shell_pgid);
+        }
     }
 
     last_status
 }
 
-fn execute_subshell(body: &[CmdNode], redirs: &[FdRedir], background: bool, ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_subshell(
+    body: &[CmdNode],
+    redirs: &[FdRedir],
+    background: bool,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     // SAFETY: fork() is a valid syscall
     let pid = unsafe { libc::fork() };
-    if pid < 0 { return 1; }
+    if pid < 0 {
+        return 1;
+    }
 
     if pid == 0 {
-        // Child
-        crate::shell::signals::reset_signals_for_child();
+        // Child subshell - keep signal handlers for trap support
+        // (reset_signals_for_child is only for external command children)
 
         for redir in redirs {
             apply_one_redir_raw(redir, ctx, vars);
@@ -1053,6 +1248,9 @@ fn execute_subshell(body: &[CmdNode], redirs: &[FdRedir], background: bool, ctx:
         child_ctx.pos_params = ctx.pos_params.clone();
 
         let mut child_vars = clone_vars_for_subshell(vars);
+        // Update $$ to the child's actual PID
+        let child_pid = unsafe { libc::getpid() };
+        child_vars.set_raw("$", child_pid.to_string(), 0);
 
         let status = execute_list(body, &mut child_ctx, &mut child_vars);
 
@@ -1077,7 +1275,9 @@ fn execute_subshell(body: &[CmdNode], redirs: &[FdRedir], background: bool, ctx:
     // Wait for child
     let mut wstatus = 0;
     // SAFETY: waitpid with valid pid
-    unsafe { libc::waitpid(pid, &mut wstatus, 0); }
+    unsafe {
+        libc::waitpid(pid, &mut wstatus, 0);
+    }
     if libc::WIFEXITED(wstatus) {
         libc::WEXITSTATUS(wstatus)
     } else if libc::WIFSIGNALED(wstatus) {
@@ -1087,20 +1287,25 @@ fn execute_subshell(body: &[CmdNode], redirs: &[FdRedir], background: bool, ctx:
     }
 }
 
-fn execute_time(body: &[CmdNode], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn execute_time(
+    body: &[CmdNode],
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     #[cfg(not(feature = "fuzz"))]
     let start = std::time::Instant::now();
     let mut rusage_before: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut rusage_before); }
-    let status = with_redirections(redirs, ctx, vars, |ctx, vars| {
-        execute_list(body, ctx, vars)
-    });
+    unsafe {
+        libc::getrusage(libc::RUSAGE_CHILDREN, &mut rusage_before);
+    }
+    let status = with_redirections(redirs, ctx, vars, |ctx, vars| execute_list(body, ctx, vars));
     #[cfg(not(feature = "fuzz"))]
     let elapsed = start.elapsed();
     let mut rusage_after: libc::rusage = unsafe { std::mem::zeroed() };
-    unsafe { libc::getrusage(libc::RUSAGE_CHILDREN, &mut rusage_after); }
-
-
+    unsafe {
+        libc::getrusage(libc::RUSAGE_CHILDREN, &mut rusage_after);
+    }
 
     #[cfg(not(feature = "fuzz"))]
     let real_secs = elapsed.as_secs_f64();
@@ -1137,16 +1342,23 @@ fn execute_coproc(name: &str, body: &[CmdNode], ctx: &mut ExecContext, vars: &mu
     let mut pipe1 = [0i32; 2];
     let mut pipe2 = [0i32; 2];
     // SAFETY: pipe() with valid ptr
-    if unsafe { libc::pipe(pipe1.as_mut_ptr()) } != 0 { return 1; }
+    if unsafe { libc::pipe(pipe1.as_mut_ptr()) } != 0 {
+        return 1;
+    }
     if unsafe { libc::pipe(pipe2.as_mut_ptr()) } != 0 {
         // SAFETY: close valid fds
-        unsafe { libc::close(pipe1[0]); libc::close(pipe1[1]); }
+        unsafe {
+            libc::close(pipe1[0]);
+            libc::close(pipe1[1]);
+        }
         return 1;
     }
 
     // SAFETY: fork() is a valid syscall
     let pid = unsafe { libc::fork() };
-    if pid < 0 { return 1; }
+    if pid < 0 {
+        return 1;
+    }
 
     if pid == 0 {
         // Child
@@ -1191,22 +1403,32 @@ fn execute_coproc(name: &str, body: &[CmdNode], ctx: &mut ExecContext, vars: &mu
 }
 
 // External command execution
-fn run_external(argv: &[String], assigns: &[(String, String)], redirs: &[FdRedir],
-                ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn run_external(
+    argv: &[String],
+    assigns: &[(String, String)],
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     // SAFETY: fork() is a valid syscall
     let pid = unsafe { libc::fork() };
-    if pid < 0 { return 1; }
+    if pid < 0 {
+        return 1;
+    }
 
     if pid == 0 {
         // Child: setup process group, but only if at top level (not in a pipeline)
         // Check if current pgid equals shell's pgid (indicates top-level execution)
         // If in a pipeline, keep inherited pgid from pipeline stage
         let current_pgid = unsafe { libc::getpgrp() };
-        let shell_pgid = crate::shell::signals::G_SHELL_PGID.load(std::sync::atomic::Ordering::SeqCst);
+        let shell_pgid =
+            crate::shell::signals::G_SHELL_PGID.load(std::sync::atomic::Ordering::SeqCst);
         if current_pgid == shell_pgid {
             // At top level: create own process group
             // SAFETY: setpgid in child before exec
-            unsafe { libc::setpgid(0, 0); }
+            unsafe {
+                libc::setpgid(0, 0);
+            }
         }
         // Otherwise in a pipeline: keep inherited pgid from pipeline stage
 
@@ -1231,28 +1453,65 @@ fn run_external(argv: &[String], assigns: &[(String, String)], redirs: &[FdRedir
         }
     }
 
-    // Store pgid for signal handling
-    crate::shell::signals::G_FOREGROUND_PID.store(pid, std::sync::atomic::Ordering::SeqCst);
+    // Store pgid for signal handling (only for top-level shell, not in subshells)
+    if !ctx.is_subshell {
+        crate::shell::signals::G_FOREGROUND_PID.store(pid, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    // Loop on waitpid, handling EINTR by checking for signal traps
     let mut wstatus = 0;
-    // SAFETY: waitpid with valid pid
-    let result = unsafe { libc::waitpid(pid, &mut wstatus, 0) };
+    let mut exit_code = 1;
+
+    loop {
+        // SAFETY: waitpid with valid pid
+        let result = unsafe { libc::waitpid(pid, &mut wstatus, 0) };
+
+        if result == pid {
+            // Child exited, got status info
+            exit_code = if libc::WIFEXITED(wstatus) {
+                libc::WEXITSTATUS(wstatus)
+            } else if libc::WIFSIGNALED(wstatus) {
+                128 + libc::WTERMSIG(wstatus)
+            } else {
+                1
+            };
+            break;
+        } else if result < 0 {
+            // Check if it was interrupted by a signal
+            let errno = std::io::Error::last_os_error();
+            if errno.raw_os_error() == Some(libc::EINTR) {
+                // Interrupted by signal - check for pending signal trap
+                if crate::shell::signals::check_and_run_trap(vars, &ctx.script_file) {
+                    // Trap was executed
+                    crate::shell::signals::G_SIGINT_RECEIVED
+                        .store(false, std::sync::atomic::Ordering::SeqCst);
+                    crate::shell::signals::G_FOREGROUND_PID
+                        .store(-1, std::sync::atomic::Ordering::SeqCst);
+                    return 0;
+                }
+                // Continue waiting for child to finish
+                continue;
+            } else {
+                // Other error (child not found, permission denied, etc.)
+                exit_code = 1;
+                break;
+            }
+        }
+    }
+
     crate::shell::signals::G_FOREGROUND_PID.store(-1, std::sync::atomic::Ordering::SeqCst);
-
-    if result < 0 {
-        return 1;
-    }
-
-    if libc::WIFEXITED(wstatus) {
-        libc::WEXITSTATUS(wstatus)
-    } else if libc::WIFSIGNALED(wstatus) {
-        128 + libc::WTERMSIG(wstatus)
-    } else {
-        1
-    }
+    exit_code
 }
 
-fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut ExecContext, vars: &mut VarStore) {
-    if argv.is_empty() { return; }
+fn exec_external(
+    argv: &[String],
+    extra_assigns: &[(String, String)],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) {
+    if argv.is_empty() {
+        return;
+    }
 
     let cmd = &argv[0];
 
@@ -1269,7 +1528,8 @@ fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut 
     };
 
     // Build C argv
-    let c_args: Vec<std::ffi::CString> = argv.iter()
+    let c_args: Vec<std::ffi::CString> = argv
+        .iter()
         .map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default())
         .collect();
     let mut c_argv: Vec<*const libc::c_char> = c_args.iter().map(|s| s.as_ptr()).collect();
@@ -1282,7 +1542,8 @@ fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut 
         env_map.insert(k.clone(), v.clone());
     }
 
-    let c_envs: Vec<std::ffi::CString> = env_map.iter()
+    let c_envs: Vec<std::ffi::CString> = env_map
+        .iter()
         .map(|(k, v)| std::ffi::CString::new(format!("{}={}", k, v)).unwrap_or_default())
         .collect();
     let mut c_envp: Vec<*const libc::c_char> = c_envs.iter().map(|s| s.as_ptr()).collect();
@@ -1291,7 +1552,9 @@ fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut 
     let c_path = std::ffi::CString::new(exe_path.as_str()).unwrap_or_default();
 
     // SAFETY: execve with valid C string pointers; all CStrings outlive the call
-    unsafe { libc::execve(c_path.as_ptr(), c_argv.as_ptr(), c_envp.as_ptr()); }
+    unsafe {
+        libc::execve(c_path.as_ptr(), c_argv.as_ptr(), c_envp.as_ptr());
+    }
 
     // ENOEXEC means the file is a script without a shebang; fall back to /bin/sh
     if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOEXEC) {
@@ -1301,17 +1564,25 @@ fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut 
             sh0,
             std::ffi::CString::new(exe_path.as_str()).unwrap_or_default(),
         ];
-        sh_args.extend(argv.iter().skip(1).map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default()));
+        sh_args.extend(
+            argv.iter()
+                .skip(1)
+                .map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default()),
+        );
         let mut sh_argv: Vec<*const libc::c_char> = sh_args.iter().map(|s| s.as_ptr()).collect();
         sh_argv.push(std::ptr::null());
-        unsafe { libc::execve(sh.as_ptr(), sh_argv.as_ptr(), c_envp.as_ptr()); }
+        unsafe {
+            libc::execve(sh.as_ptr(), sh_argv.as_ptr(), c_envp.as_ptr());
+        }
     }
 
     eprintln!("zesh: {}: {}", cmd, std::io::Error::last_os_error());
 }
 
 pub fn find_in_path(cmd: &str, vars: &VarStore) -> Option<String> {
-    let path = vars.get_str("PATH").unwrap_or_else(|| "/usr/local/bin:/usr/bin:/bin".to_string());
+    let path = vars
+        .get_str("PATH")
+        .unwrap_or_else(|| "/usr/local/bin:/usr/bin:/bin".to_string());
     for dir in path.split(':') {
         let full = format!("{}/{}", dir, cmd);
         if std::path::Path::new(&full).is_file() {
@@ -1327,7 +1598,12 @@ pub fn find_in_path(cmd: &str, vars: &VarStore) -> Option<String> {
 }
 
 // Special exec builtin
-fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+fn builtin_exec(
+    args: &[String],
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     // Check if it's fd operations only (no command)
     // exec N>file, exec N<file, exec N>&M, exec N>&-
 
@@ -1384,7 +1660,12 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
-            "-l" | "-a" | "-c" => { i += 1; if i < argv.len() { i += 1; } }
+            "-l" | "-a" | "-c" => {
+                i += 1;
+                if i < argv.len() {
+                    i += 1;
+                }
+            }
             _ => break,
         }
     }
@@ -1398,7 +1679,8 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
             find_in_path(exe, vars).unwrap_or_else(|| exe.clone())
         };
 
-        let c_args: Vec<std::ffi::CString> = exe_args.iter()
+        let c_args: Vec<std::ffi::CString> = exe_args
+            .iter()
             .map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default())
             .collect();
         let mut c_argv: Vec<*const libc::c_char> = c_args.iter().map(|s| s.as_ptr()).collect();
@@ -1409,7 +1691,8 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
         for (k, v) in vars.all_exported() {
             env_map.insert(k, v);
         }
-        let c_envs: Vec<std::ffi::CString> = env_map.iter()
+        let c_envs: Vec<std::ffi::CString> = env_map
+            .iter()
             .map(|(k, v)| std::ffi::CString::new(format!("{}={}", k, v)).unwrap_or_default())
             .collect();
         let mut c_envp: Vec<*const libc::c_char> = c_envs.iter().map(|s| s.as_ptr()).collect();
@@ -1417,7 +1700,9 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
 
         let c_path = std::ffi::CString::new(exe_path.as_str()).unwrap_or_default();
         // SAFETY: execve with valid C string pointers; all CStrings outlive the call
-        unsafe { libc::execve(c_path.as_ptr(), c_argv.as_ptr(), c_envp.as_ptr()); }
+        unsafe {
+            libc::execve(c_path.as_ptr(), c_argv.as_ptr(), c_envp.as_ptr());
+        }
 
         // ENOEXEC means the file is a script without a shebang; fall back to /bin/sh
         if std::io::Error::last_os_error().raw_os_error() == Some(libc::ENOEXEC) {
@@ -1427,10 +1712,18 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
                 sh0,
                 std::ffi::CString::new(exe_path.as_str()).unwrap_or_default(),
             ];
-            sh_args.extend(exe_args.iter().skip(1).map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default()));
-            let mut sh_argv: Vec<*const libc::c_char> = sh_args.iter().map(|s| s.as_ptr()).collect();
+            sh_args.extend(
+                exe_args
+                    .iter()
+                    .skip(1)
+                    .map(|s| std::ffi::CString::new(s.as_str()).unwrap_or_default()),
+            );
+            let mut sh_argv: Vec<*const libc::c_char> =
+                sh_args.iter().map(|s| s.as_ptr()).collect();
             sh_argv.push(std::ptr::null());
-            unsafe { libc::execve(sh.as_ptr(), sh_argv.as_ptr(), c_envp.as_ptr()); }
+            unsafe {
+                libc::execve(sh.as_ptr(), sh_argv.as_ptr(), c_envp.as_ptr());
+            }
         }
 
         eprintln!("zesh: exec: {}: {}", exe, std::io::Error::last_os_error());
@@ -1440,61 +1733,69 @@ fn builtin_exec(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars
     0
 }
 
-fn try_builtin(name: &str, args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> Option<i32> {
+fn try_builtin(
+    name: &str,
+    args: &[String],
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> Option<i32> {
     use crate::shell::builtins::*;
     let status = match name {
-        "echo"      => Some(builtin_echo(args, redirs, ctx, vars)),
-        "printf"    => Some(builtin_printf(args, redirs, ctx, vars)),
-        "cd"        => Some(builtin_cd(args, ctx, vars)),
-        "pwd"       => Some(builtin_pwd(args, redirs, ctx, vars)),
-        "exit"      => Some(builtin_exit(args, ctx, vars)),
-        "return"    => Some(builtin_return(args, ctx, vars)),
-        "break"     => Some(builtin_break(args, ctx, vars)),
-        "continue"  => Some(builtin_continue(args, ctx, vars)),
-        "set"       => Some(builtin_set(args, ctx, vars)),
-        "unset"     => Some(builtin_unset(args, vars)),
-        "export"    => Some(builtin_export(args, vars)),
-        "readonly"  => Some(builtin_readonly(args, vars)),
-        "local"     => Some(builtin_local(args, vars)),
+        "echo" => Some(builtin_echo(args, redirs, ctx, vars)),
+        "printf" => Some(builtin_printf(args, redirs, ctx, vars)),
+        "cd" => Some(builtin_cd(args, ctx, vars)),
+        "pwd" => Some(builtin_pwd(args, redirs, ctx, vars)),
+        "exit" => Some(builtin_exit(args, ctx, vars)),
+        "return" => Some(builtin_return(args, ctx, vars)),
+        "break" => Some(builtin_break(args, ctx, vars)),
+        "continue" => Some(builtin_continue(args, ctx, vars)),
+        "set" => Some(builtin_set(args, ctx, vars)),
+        "unset" => Some(builtin_unset(args, vars)),
+        "export" => Some(builtin_export(args, vars)),
+        "readonly" => Some(builtin_readonly(args, vars)),
+        "local" => Some(builtin_local(args, vars)),
         "declare" | "typeset" => Some(builtin_declare(args, vars)),
-        "read"      => Some(builtin_read(args, redirs, ctx, vars)),
+        "read" => Some(builtin_read(args, redirs, ctx, vars)),
         "source" | "." => Some(builtin_source(args, ctx, vars)),
         "true" | ":" => Some(0),
-        "false"     => Some(1),
+        "false" => Some(1),
         "test" | "[" => Some(builtin_test(args)),
         "[[" | "]]" => Some(0), // handled in parser
-        "eval"      => Some(builtin_eval(args, redirs, ctx, vars)),
-        "type"      => {
+        "eval" => Some(builtin_eval(args, redirs, ctx, vars)),
+        "type" => {
             let status = builtin_type(args, vars);
             Some(with_redirections(redirs, ctx, vars, |_, _| status))
         }
-        "hash"      => Some(builtin_hash(args, redirs, ctx, vars)),
-        "wait"      => Some(builtin_wait(args, vars)),
-        "jobs"      => Some(builtin_jobs(args, redirs, ctx, vars)),
-        "bg"        => Some(builtin_bg(args, redirs, ctx, vars)),
-        "fg"        => Some(builtin_fg(args, redirs, ctx, vars)),
-        "kill"      => Some(builtin_kill(args)),
-        "trap"      => Some(builtin_trap(args, ctx, vars)),
-        "umask"     => Some(builtin_umask(args, redirs, ctx, vars)),
-        "ulimit"    => Some(builtin_ulimit(args, redirs, ctx, vars)),
-        "getopts"   => Some(builtin_getopts(args, ctx, vars)),
+        "hash" => Some(builtin_hash(args, redirs, ctx, vars)),
+        "wait" => Some(builtin_wait(args, vars)),
+        "jobs" => Some(builtin_jobs(args, redirs, ctx, vars)),
+        "bg" => Some(builtin_bg(args, redirs, ctx, vars)),
+        "fg" => Some(builtin_fg(args, redirs, ctx, vars)),
+        "kill" => Some(builtin_kill(args)),
+        "trap" => Some(builtin_trap(args, ctx, vars)),
+        "umask" => Some(builtin_umask(args, redirs, ctx, vars)),
+        "ulimit" => Some(builtin_ulimit(args, redirs, ctx, vars)),
+        "getopts" => Some(builtin_getopts(args, ctx, vars)),
         "mapfile" | "readarray" => Some(builtin_mapfile(args, redirs, ctx, vars)),
-        "select"    => None, // handled as compound
-        "caller"    => Some(with_redirections(redirs, ctx, vars, |ctx, _| builtin_caller(args, ctx))),
-        "compgen"   => Some(builtin_compgen(args, redirs, ctx, vars)),
-        "complete"  => Some(0),
-        "disown"    => Some(builtin_disown(args, vars)),
-        "shift"     => Some(builtin_shift(args, ctx, vars)),
-        "printf"    => Some(builtin_printf(args, redirs, ctx, vars)),
-        "times"     => Some(0),
-        "suspend"   => Some(0),
-        "fc"        => Some(0),
-        "history"   => Some(builtin_history(args, redirs, ctx, vars)),
-        "dirs"      => Some(0),
-        "popd"      => Some(0),
-        "pushd"     => Some(0),
-        "let"       => Some(builtin_let(args, vars)),
-        "builtin"   => {
+        "select" => None, // handled as compound
+        "caller" => Some(with_redirections(redirs, ctx, vars, |ctx, _| {
+            builtin_caller(args, ctx)
+        })),
+        "compgen" => Some(builtin_compgen(args, redirs, ctx, vars)),
+        "complete" => Some(0),
+        "disown" => Some(builtin_disown(args, vars)),
+        "shift" => Some(builtin_shift(args, ctx, vars)),
+        "printf" => Some(builtin_printf(args, redirs, ctx, vars)),
+        "times" => Some(0),
+        "suspend" => Some(0),
+        "fc" => Some(0),
+        "history" => Some(builtin_history(args, redirs, ctx, vars)),
+        "dirs" => Some(0),
+        "popd" => Some(0),
+        "pushd" => Some(0),
+        "let" => Some(builtin_let(args, vars)),
+        "builtin" => {
             if args.is_empty() {
                 Some(0)
             } else {
@@ -1503,7 +1804,7 @@ fn try_builtin(name: &str, args: &[String], redirs: &[FdRedir], ctx: &mut ExecCo
                 try_builtin(new_name, new_args, redirs, ctx, vars)
             }
         }
-        "command"   => {
+        "command" => {
             if args.is_empty() {
                 Some(0)
             } else {
@@ -1512,13 +1813,18 @@ fn try_builtin(name: &str, args: &[String], redirs: &[FdRedir], ctx: &mut ExecCo
                 Some(run_external(&new_argv, &[], redirs, ctx, vars))
             }
         }
-        _           => None,
+        _ => None,
     };
     status
 }
 
 // Run command for script mode
-pub fn run_script(script: &str, script_file: &str, ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+pub fn run_script(
+    script: &str,
+    script_file: &str,
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
     let tokens = crate::shell::lexer::lex(script);
     let nodes = crate::shell::parser::parse(tokens);
     ctx.script_file = script_file.to_string();
@@ -1528,10 +1834,17 @@ pub fn run_script(script: &str, script_file: &str, ctx: &mut ExecContext, vars: 
 }
 
 // Public helpers for builtins
-pub fn apply_redirections_for_builtin(redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> Vec<SavedFd> {
+pub fn apply_redirections_for_builtin(
+    redirs: &[FdRedir],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> Vec<SavedFd> {
     match apply_redirections_save(redirs, ctx, vars) {
         Ok(s) => s,
-        Err(partial) => { restore_redirections(partial); Vec::new() }
+        Err(partial) => {
+            restore_redirections(partial);
+            Vec::new()
+        }
     }
 }
 

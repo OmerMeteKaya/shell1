@@ -5,6 +5,7 @@ use std::sync::Mutex;
 
 pub static G_SIGINT_RECEIVED: AtomicBool = AtomicBool::new(false);
 pub static G_INTERRUPT_LOOP: AtomicBool = AtomicBool::new(false);
+pub static G_PENDING_SIGNAL: AtomicI32 = AtomicI32::new(-1);  // signal number, -1 = none
 pub static G_FOREGROUND_PID: AtomicI32 = AtomicI32::new(-1);
 pub static G_EXIT_TRAP_RUNNING: AtomicBool = AtomicBool::new(false);
 pub static G_PENDING_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
@@ -19,15 +20,16 @@ pub static G_TRAP_ACTIONS: Mutex<[Option<String>; 32]> = Mutex::new([
 ]);
 pub static G_TRAP_EXIT: Mutex<Option<String>> = Mutex::new(None);
 
-extern "C" fn handle_sigint(_sig: libc::c_int) {
+extern "C" fn handle_sigint(sig: libc::c_int) {
     G_SIGINT_RECEIVED.store(true, Ordering::SeqCst);
     G_INTERRUPT_LOOP.store(true, Ordering::SeqCst);
+    G_PENDING_SIGNAL.store(sig, Ordering::SeqCst);
 
     let fgpgid = G_FOREGROUND_PID.load(Ordering::SeqCst);
     if fgpgid > 0 {
         // fgpgid is actually a process group id (pgid). Send SIGINT to the entire process group
         // by using the negative pgid. SAFETY: sending SIGINT to a process group is valid
-        unsafe { libc::kill(-fgpgid, libc::SIGINT); }
+        unsafe { libc::kill(-fgpgid, sig); }
     }
 }
 
@@ -75,8 +77,15 @@ pub fn setup_signals() {
         let mut sa: libc::sigaction = std::mem::zeroed();
         sa.sa_sigaction = handle_sigint as usize;
         libc::sigemptyset(&mut sa.sa_mask);
-        sa.sa_flags = libc::SA_RESTART;
+        sa.sa_flags = 0;  // Don't use SA_RESTART for SIGINT - we need waitpid to return EINTR
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+
+        // SIGTERM - use same handler as SIGINT, also without SA_RESTART
+        let mut sa_term: libc::sigaction = std::mem::zeroed();
+        sa_term.sa_sigaction = handle_sigint as usize;
+        libc::sigemptyset(&mut sa_term.sa_mask);
+        sa_term.sa_flags = 0;  // Don't use SA_RESTART for SIGTERM - we need waitpid to return EINTR
+        libc::sigaction(libc::SIGTERM, &sa_term, std::ptr::null_mut());
 
         // SIGCHLD
         let mut sa2: libc::sigaction = std::mem::zeroed();
@@ -107,6 +116,7 @@ pub fn reset_signals_for_child() {
         sa.sa_sigaction = libc::SIG_DFL;
         libc::sigemptyset(&mut sa.sa_mask);
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+        libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGPIPE, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGTTOU, &sa, std::ptr::null_mut());
         libc::sigaction(libc::SIGTTIN, &sa, std::ptr::null_mut());
@@ -120,4 +130,28 @@ pub fn run_exit_trap(action: &str, vars: &crate::shell::vars::VarStore, script_f
     ctx.script_file = script_file.to_string();
     ctx.exit_status = G_PENDING_EXIT_STATUS.load(Ordering::SeqCst);
     crate::shell::executor::execute_list_with_vars(&nodes, &mut ctx, vars);
+}
+
+pub fn check_and_run_trap(vars: &crate::shell::vars::VarStore, script_file: &str) -> bool {
+    let sig_num = G_PENDING_SIGNAL.swap(-1, Ordering::SeqCst);
+    if sig_num < 0 || sig_num >= 32 {
+        return false;
+    }
+
+    let action = if let Ok(traps) = G_TRAP_ACTIONS.lock() {
+        traps[sig_num as usize].clone()
+    } else {
+        return false;
+    };
+
+    if let Some(action_str) = action {
+        let tokens = crate::shell::lexer::lex(&action_str);
+        let nodes = crate::shell::parser::parse(tokens);
+        let mut ctx = crate::shell::executor::ExecContext::new_subshell();
+        ctx.script_file = script_file.to_string();
+        ctx.exit_status = 0;
+        crate::shell::executor::execute_list_with_vars(&nodes, &mut ctx, vars);
+        return true;
+    }
+    false
 }

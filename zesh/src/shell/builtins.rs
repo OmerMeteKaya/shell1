@@ -1601,7 +1601,7 @@ pub fn builtin_trap(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore)
     }
 
     for sig in signals {
-        match sig.as_str() {
+        let sig_num = match sig.as_str() {
             "EXIT" | "0" => {
                 if let Ok(mut trap) = crate::shell::signals::G_TRAP_EXIT.lock() {
                     if action == "-" || action.is_empty() {
@@ -1610,8 +1610,27 @@ pub fn builtin_trap(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore)
                         *trap = Some(action.clone());
                     }
                 }
+                continue;
             }
-            _ => {}
+            "INT" | "2" => libc::SIGINT,
+            "TERM" | "15" => libc::SIGTERM,
+            "HUP" | "1" => libc::SIGHUP,
+            "QUIT" | "3" => libc::SIGQUIT,
+            "ABRT" | "6" => libc::SIGABRT,
+            "ALRM" | "14" => libc::SIGALRM,
+            "USR1" | "10" => libc::SIGUSR1,
+            "USR2" | "12" => libc::SIGUSR2,
+            _ => continue,
+        };
+
+        if let Ok(mut traps) = crate::shell::signals::G_TRAP_ACTIONS.lock() {
+            if (sig_num as usize) < traps.len() {
+                if action == "-" || action.is_empty() {
+                    traps[sig_num as usize] = None;
+                } else {
+                    traps[sig_num as usize] = Some(action.clone());
+                }
+            }
         }
     }
     0
