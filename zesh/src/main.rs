@@ -75,6 +75,19 @@ fn main() {
                     std::process::exit(status);
                 } else {
                     let status = run_script(cmd, "-c", &mut ctx, &mut vars);
+
+                    // Run EXIT trap
+                    {
+                        let trap_action = if let Ok(trap) = crate::shell::signals::G_TRAP_EXIT.lock() {
+                            trap.clone()
+                        } else {
+                            None
+                        };
+                        if let Some(action) = trap_action {
+                            crate::shell::signals::run_exit_trap(&action, &vars, "-c");
+                        }
+                    }
+
                     std::process::exit(status);
                 }
             }
