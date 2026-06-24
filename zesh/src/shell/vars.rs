@@ -57,6 +57,7 @@ pub struct VarStore {
     pub functions: HashMap<String, ShellFunction>,
     pub arrays: HashMap<String, ShellArray>,
     pub hash_table: HashMap<String, String>,  // command hash cache
+    env_cache: Option<HashMap<String, String>>,  // cached environment for exec
 }
 
 impl VarStore {
@@ -76,6 +77,7 @@ impl VarStore {
             functions: HashMap::new(),
             arrays: HashMap::new(),
             hash_table: HashMap::new(),
+            env_cache: None,
         }
     }
 
@@ -173,6 +175,10 @@ impl VarStore {
         } else {
             value
         };
+        // Invalidate env cache if export attribute is being added
+        if new_attrs & ATTR_EXPORT != 0 && existing_attrs & ATTR_EXPORT == 0 {
+            self.invalidate_env_cache();
+        }
         self.set_raw(name, value, new_attrs);
     }
 
@@ -264,6 +270,34 @@ impl VarStore {
             }
         }
         result
+    }
+
+    // Get cached environment for exec (avoids rebuilding on every fork)
+    pub fn get_env_for_exec(&mut self) -> HashMap<String, String> {
+        // If cache is valid, return it (with exported vars included)
+        if let Some(cache) = &self.env_cache {
+            return cache.clone();
+        }
+
+        // Build cache: start with current process environment
+        let mut env_map: HashMap<String, String> = std::env::vars().collect();
+
+        // Add/override with exported shell variables
+        for scope in &self.scopes {
+            for (k, v) in &scope.vars {
+                if v.attrs & ATTR_EXPORT != 0 {
+                    env_map.insert(k.clone(), v.value.clone());
+                }
+            }
+        }
+
+        self.env_cache = Some(env_map.clone());
+        env_map
+    }
+
+    // Invalidate environment cache (call when exporting a variable)
+    fn invalidate_env_cache(&mut self) {
+        self.env_cache = None;
     }
 }
 

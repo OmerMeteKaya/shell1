@@ -12,9 +12,15 @@ pub fn eval_arith_simple(expr: &str) -> Result<i64, String> {
     ARITH_VARS.with(|v| {
         *v.borrow_mut() = Some(std::collections::HashMap::new());
     });
+    ARITH_VARSTORE_PTR.with(|ptr| {
+        *ptr.borrow_mut() = std::ptr::null();
+    });
     let result = eval_arith_expr(expr);
     ARITH_VARS.with(|v| {
         *v.borrow_mut() = None;
+    });
+    ARITH_VARSTORE_PTR.with(|ptr| {
+        *ptr.borrow_mut() = std::ptr::null();
     });
     result
 }
@@ -230,9 +236,20 @@ fn arith_parse_expr(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> {
 }
 
 fn arith_var_read(name: &str) -> i64 {
-    let val = ARITH_VARS.with(|v| {
-        if let Some(map) = &*v.borrow() {
-            map.get(name).cloned().unwrap_or_default()
+    // First check if it was assigned in this arithmetic evaluation (stored in ARITH_VARS)
+    if let Some(val_str) = ARITH_VARS.with(|v| {
+        v.borrow().as_ref().and_then(|map| map.get(name).cloned())
+    }) {
+        return val_str.trim().parse().unwrap_or(0);
+    }
+
+    // Otherwise, look up directly from the VarStore (avoids cloning all variables)
+    let val = ARITH_VARSTORE_PTR.with(|ptr| {
+        let varstore_ptr = *ptr.borrow();
+        if !varstore_ptr.is_null() {
+            unsafe {
+                (*varstore_ptr).get_str(name).unwrap_or_default()
+            }
         } else {
             String::new()
         }
@@ -498,8 +515,12 @@ fn arith_parse_unary(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> {
 
 // Global vars reference for arith (only used when called from eval_arith_simple)
 thread_local! {
+    // Only for variables modified during arithmetic evaluation (assignments inside $(()), not for reading)
     static ARITH_VARS: std::cell::RefCell<Option<std::collections::HashMap<String, String>>> =
         std::cell::RefCell::new(None);
+    // Pointer to VarStore for efficient variable lookup during arithmetic (avoids cloning all vars)
+    static ARITH_VARSTORE_PTR: std::cell::RefCell<*const crate::shell::vars::VarStore> =
+        std::cell::RefCell::new(std::ptr::null());
     static ARITH_DEPTH: std::cell::RefCell<usize> = std::cell::RefCell::new(0);
     static EXPAND_DEPTH: std::cell::RefCell<usize> = std::cell::RefCell::new(0);
     // Set to true when ${var:?err} triggers
@@ -1865,7 +1886,7 @@ pub fn run_command_substitution(cmd: &str, vars: &crate::shell::vars::VarStore, 
 
 pub fn eval_arith_expr_with_vars(expr: &str, vars: &crate::shell::vars::VarStore) -> Result<i64, String> {
     // Expand $VAR references in the expression, then evaluate
-    // Also set up thread-local var context for bare variable names
+    // Store VarStore pointer for variable lookups (avoids expensive all_vars() clone)
     let depth_exceeded = EXPAND_DEPTH.with(|d| {
         let mut depth = d.borrow_mut();
         if *depth >= MAX_EXPAND_DEPTH {
@@ -1877,15 +1898,26 @@ pub fn eval_arith_expr_with_vars(expr: &str, vars: &crate::shell::vars::VarStore
     if depth_exceeded {
         return Err("Expansion nesting too deep".to_string());
     }
-    let var_map = vars.all_vars();
+
+    // Initialize ARITH_VARS for tracking in-arithmetic assignments, and set VarStore pointer
     ARITH_VARS.with(|v| {
-        *v.borrow_mut() = Some(var_map);
+        *v.borrow_mut() = Some(std::collections::HashMap::new());
     });
+    ARITH_VARSTORE_PTR.with(|ptr| {
+        *ptr.borrow_mut() = vars as *const _;
+    });
+
     let expanded = expand_vars_in_arith(expr, vars);
     let result = eval_arith_expr(&expanded);
+
+    // Clean up
     ARITH_VARS.with(|v| {
         *v.borrow_mut() = None;
     });
+    ARITH_VARSTORE_PTR.with(|ptr| {
+        *ptr.borrow_mut() = std::ptr::null();
+    });
+
     EXPAND_DEPTH.with(|d| {
         *d.borrow_mut() -= 1;
     });

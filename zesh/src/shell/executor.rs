@@ -1275,14 +1275,11 @@ fn exec_external(argv: &[String], extra_assigns: &[(String, String)], ctx: &mut 
     let mut c_argv: Vec<*const libc::c_char> = c_args.iter().map(|s| s.as_ptr()).collect();
     c_argv.push(std::ptr::null());
 
-    // Build environment
-    let mut env_map: HashMap<String, String> = std::env::vars().collect();
+    // Build environment from cache (avoids rebuilding from scratch on every exec)
+    let mut env_map = vars.get_env_for_exec();
+    // Add any extra assignments (temporary assignments for this command only)
     for (k, v) in extra_assigns {
         env_map.insert(k.clone(), v.clone());
-    }
-    // Add exported vars
-    for (k, v) in vars.all_exported() {
-        env_map.insert(k, v);
     }
 
     let c_envs: Vec<std::ffi::CString> = env_map.iter()
