@@ -839,7 +839,7 @@ impl Parser {
         let line = self.peek().line;
         let mut assigns = Vec::new();
         let mut array_assigns: Vec<(String, Vec<String>, bool)> = Vec::new();
-        let mut words = Vec::new();
+        let mut words: Vec<Token> = Vec::new();
         let mut redirs = Vec::new();
 
         loop {
@@ -882,6 +882,46 @@ impl Parser {
                             array_assigns.push((k, elems, is_append));
                         } else {
                             assigns.push((k, v, is_append));
+                        }
+                    } else if !words.is_empty() && is_assignment(&tok.value) {
+                        // Special handling for local/declare/typeset with array literals
+                        if let Some(cmd_first_word) = words.first() {
+                            let cmd_name = cmd_first_word.value.as_str();
+                            if matches!(cmd_name, "local" | "declare" | "typeset") {
+                                let eq = tok.value.find('=').unwrap();
+                                let is_append = eq > 0 && tok.value.as_bytes()[eq - 1] == b'+';
+                                let (k, v) = if is_append {
+                                    (tok.value[..eq - 1].to_string(), tok.value[eq + 1..].to_string())
+                                } else {
+                                    (tok.value[..eq].to_string(), tok.value[eq + 1..].to_string())
+                                };
+                                // Check for array literal: NAME=(elem1 elem2 ...) or NAME+=(elem1 elem2 ...)
+                                if v.is_empty() && self.peek_kind() == &TokKind::LParen {
+                                    self.advance(); // consume '('
+                                    let mut elems = Vec::new();
+                                    loop {
+                                        match self.peek_kind() {
+                                            TokKind::RParen | TokKind::Eof => {
+                                                if self.peek_kind() == &TokKind::RParen {
+                                                    self.advance();
+                                                }
+                                                break;
+                                            }
+                                            _ => {
+                                                let elem = self.consume();
+                                                elems.push(elem.value);
+                                            }
+                                        }
+                                    }
+                                    array_assigns.push((k, elems, is_append));
+                                } else {
+                                    words.push(tok);
+                                }
+                            } else {
+                                words.push(tok);
+                            }
+                        } else {
+                            words.push(tok);
                         }
                     } else {
                         words.push(tok);

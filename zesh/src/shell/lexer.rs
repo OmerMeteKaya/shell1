@@ -769,11 +769,26 @@ impl Lexer {
                     tokens.push(Token { kind: TokKind::RParen, value: ")".to_string(), quoted: false, line });
                 }
                 Some('!') => {
-                    self.advance();
-                    if self.peek() == Some('=') {
+                    // Check what follows !
+                    if self.peek2() == Some('=') {
+                        // !=
+                        self.advance();
                         self.advance();
                         tokens.push(Token { kind: TokKind::Word, value: "!=".to_string(), quoted: false, line });
+                    } else if let Some(next) = self.peek2() {
+                        // If ! is followed by word chars (like !distcc), treat it as a word
+                        if next.is_alphanumeric() || next == '_' {
+                            let (value, quoted) = self.read_word_raw();
+                            let kind = word_to_keyword(&value);
+                            tokens.push(Token { kind, value, quoted, line });
+                        } else {
+                            // Otherwise, it's a standalone bang operator
+                            self.advance();
+                            tokens.push(Token { kind: TokKind::Bang, value: "!".to_string(), quoted: false, line });
+                        }
                     } else {
+                        // ! at end of input
+                        self.advance();
                         tokens.push(Token { kind: TokKind::Bang, value: "!".to_string(), quoted: false, line });
                     }
                 }

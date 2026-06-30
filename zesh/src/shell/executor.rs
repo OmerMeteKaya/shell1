@@ -6,6 +6,7 @@ use std::path::PathBuf;
 
 use crate::shell::expand::{
     eval_arith_expr_with_vars, expand_heredoc_body, expand_string, expand_token,
+    take_param_assigns,
 };
 use crate::shell::types::*;
 use crate::shell::vars::{VarStore, ATTR_EXPORT, ATTR_LOCAL};
@@ -586,6 +587,31 @@ fn execute_simple(
     // should set $? to the cmd's exit code (bash behavior)
     let cmdsub_status = crate::shell::expand::take_cmdsub_status();
 
+    // Process array literal assignments ARR=(elem1 elem2 ...) or ARR+=(elem1 elem2 ...)
+    // This is done for all commands, not just when argv is empty, because commands like
+    // `local arr=(...)` need to create the array before the builtin runs
+    for (arr_name, elems, is_append) in &cmd.array_assigns {
+        if !is_append {
+            vars.arrays.remove(arr_name);
+        }
+        let start_idx = if *is_append {
+            let existing = vars.arrays.get(arr_name).cloned().unwrap_or_default();
+            existing.len()
+        } else {
+            0
+        };
+        let mut current_idx = start_idx;
+        for elem in elems.iter() {
+            // Use expand_word to properly handle ${arr[@]/pattern/replacement}
+            // which should expand to multiple elements in an array context
+            let expanded_parts = crate::shell::expand::expand_word(elem, true, vars, &ctx.script_file);
+            for part in expanded_parts {
+                vars.set_array_elem(arr_name, current_idx, part);
+                current_idx += 1;
+            }
+        }
+    }
+
     // If no words, just apply assignments
     if argv.is_empty() {
         let mut assign_status = 0;
@@ -593,28 +619,6 @@ fn execute_simple(
             vars.set(k, v.clone());
             if crate::shell::vars::take_readonly_error() {
                 assign_status = 1;
-            }
-        }
-        // Process array literal assignments ARR=(elem1 elem2 ...) or ARR+=(elem1 elem2 ...)
-        for (arr_name, elems, is_append) in &cmd.array_assigns {
-            if !is_append {
-                vars.arrays.remove(arr_name);
-            }
-            let start_idx = if *is_append {
-                let existing = vars.arrays.get(arr_name).cloned().unwrap_or_default();
-                existing.len()
-            } else {
-                0
-            };
-            let mut current_idx = start_idx;
-            for elem in elems.iter() {
-                // Use expand_word to properly handle ${arr[@]/pattern/replacement}
-                // which should expand to multiple elements in an array context
-                let expanded_parts = crate::shell::expand::expand_word(elem, true, vars, &ctx.script_file);
-                for part in expanded_parts {
-                    vars.set_array_elem(arr_name, current_idx, part);
-                    current_idx += 1;
-                }
             }
         }
         // Apply redirections without command
@@ -904,6 +908,11 @@ fn execute_for(
     ctx: &mut ExecContext,
     vars: &mut VarStore,
 ) -> i32 {
+    // Check if this is an arithmetic for loop: for (( init; cond; incr ))
+    if var.starts_with("((") && var.ends_with("))") {
+        return execute_arith_for(var, body, ctx, vars);
+    }
+
     // Expand word list
     let mut items = Vec::new();
     for w in words {
@@ -945,6 +954,104 @@ fn execute_for(
             break;
         }
     }
+    last_status
+}
+
+fn execute_arith_for(
+    arith_for_str: &str,
+    body: &[CmdNode],
+    ctx: &mut ExecContext,
+    vars: &mut VarStore,
+) -> i32 {
+    // Parse for (( init; cond; incr ))
+    // Extract content between (( and ))
+    if !arith_for_str.starts_with("((") || !arith_for_str.ends_with("))") {
+        return 0;
+    }
+
+    let content = &arith_for_str[2..arith_for_str.len()-2];
+    let parts: Vec<&str> = content.split(';').map(|s| s.trim()).collect();
+
+    if parts.len() != 3 {
+        return 0; // Invalid format
+    }
+
+    // Expand the expressions to replace variables like $# with their values
+    let init_expr = expand_string(parts[0], vars, &ctx.script_file);
+    let cond_expr_template = parts[1];
+    let incr_expr_template = parts[2];
+
+    // Execute init
+    if !init_expr.is_empty() {
+        match eval_arith_expr_with_vars(&init_expr, vars) {
+            Ok(_) => {
+                // Apply any variable assignments from arithmetic eval
+                for (name, val) in take_param_assigns() {
+                    vars.set(&name, val);
+                }
+            }
+            Err(_) => return 0,
+        }
+    }
+
+    let mut last_status = 0;
+
+    // Loop: check condition, execute body, execute increment
+    loop {
+        // Expand and evaluate condition
+        let cond_result = if cond_expr_template.is_empty() {
+            1 // Empty condition is true
+        } else {
+            let cond_expr = expand_string(cond_expr_template, vars, &ctx.script_file);
+            match eval_arith_expr_with_vars(&cond_expr, vars) {
+                Ok(n) => n,
+                Err(_) => 0,
+            }
+        };
+
+        if cond_result == 0 {
+            break;
+        }
+
+        // Execute body
+        last_status = execute_list(body, ctx, vars);
+
+        // Handle break/continue
+        match &ctx.loop_control {
+            LoopControl::Break(n) => {
+                if *n <= 1 {
+                    ctx.loop_control = LoopControl::None;
+                } else {
+                    ctx.loop_control = LoopControl::Break(n - 1);
+                }
+                break;
+            }
+            LoopControl::Continue(n) => {
+                if *n > 1 {
+                    ctx.loop_control = LoopControl::Continue(n - 1);
+                    break;
+                }
+                ctx.loop_control = LoopControl::None;
+                // Continue to increment
+            }
+            LoopControl::None => {}
+        }
+
+        if ctx.returning {
+            break;
+        }
+
+        // Execute increment
+        if !incr_expr_template.is_empty() {
+            let incr_expr = expand_string(incr_expr_template, vars, &ctx.script_file);
+            let _ = eval_arith_expr_with_vars(&incr_expr, vars);
+            // Apply any variable assignments from arithmetic eval
+            for (name, val) in take_param_assigns() {
+                vars.set(&name, val);
+            }
+        }
+    }
+
     last_status
 }
 

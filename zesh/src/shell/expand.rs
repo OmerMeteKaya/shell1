@@ -633,6 +633,122 @@ fn has_unquoted_glob_chars(word: &str) -> bool {
     false
 }
 
+fn expand_braces(word: &str) -> Vec<String> {
+    // Brace expansion: {alt1,alt2,...} -> alt1, alt2, ...
+    // Must not be quoted. Returns a vector of all expanded alternatives.
+    // If no braces found, returns vec![word.to_string()]
+
+    let chars: Vec<char> = word.chars().collect();
+    let mut results = vec![String::new()];
+    let mut i = 0;
+
+    while i < chars.len() {
+        match chars[i] {
+            '{' => {
+                // Try to find a matching }
+                let mut depth = 1;
+                let mut j = i + 1;
+                let mut has_comma = false;
+
+                // Find matching close brace
+                while j < chars.len() && depth > 0 {
+                    match chars[j] {
+                        '{' => depth += 1,
+                        '}' => depth -= 1,
+                        ',' if depth == 1 => has_comma = true,
+                        _ => {}
+                    }
+                    j += 1;
+                }
+
+                // If we found a matching close brace and at least one comma at depth 1, expand
+                if depth == 0 && has_comma {
+                    // Extract content between braces
+                    let content: String = chars[i+1..j-1].iter().collect();
+                    let alternatives = split_brace_alternatives(&content);
+
+                    // Multiply current results with new alternatives
+                    // Recursively expand each alternative (for nested braces)
+                    let mut new_results = Vec::new();
+                    for alt in alternatives {
+                        let expanded_alt = expand_braces(&alt); // Recursive expansion
+                        for expanded_item in expanded_alt {
+                            for existing in &results {
+                                new_results.push(format!("{}{}", existing, expanded_item));
+                            }
+                        }
+                    }
+                    results = new_results;
+                    i = j;
+                } else {
+                    // No valid brace expansion, just add the character
+                    for r in &mut results {
+                        r.push('{');
+                    }
+                    i += 1;
+                }
+            }
+            _ => {
+                for r in &mut results {
+                    r.push(chars[i]);
+                }
+                i += 1;
+            }
+        }
+    }
+
+    results
+}
+
+fn split_brace_alternatives(content: &str) -> Vec<String> {
+    // Split content by commas, but respect nested braces
+    let chars: Vec<char> = content.chars().collect();
+    let mut alternatives = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0;
+    let mut in_quotes = false;
+    let mut quote_char = ' ';
+
+    for (i, &ch) in chars.iter().enumerate() {
+        match ch {
+            '\'' if !in_quotes => {
+                in_quotes = true;
+                quote_char = '\'';
+                current.push(ch);
+            }
+            '\'' if in_quotes && quote_char == '\'' => {
+                in_quotes = false;
+                current.push(ch);
+            }
+            '"' if !in_quotes => {
+                in_quotes = true;
+                quote_char = '"';
+                current.push(ch);
+            }
+            '"' if in_quotes && quote_char == '"' => {
+                in_quotes = false;
+                current.push(ch);
+            }
+            '{' if !in_quotes => {
+                depth += 1;
+                current.push(ch);
+            }
+            '}' if !in_quotes => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 && !in_quotes => {
+                alternatives.push(current.clone());
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+
+    alternatives.push(current);
+    alternatives
+}
+
 // Expand a word token, returning list of strings (after word splitting + glob)
 pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore, script_file: &str) -> Vec<String> {
     // Special case: "$@" or "${@}" inside double quotes should expand to multiple words
@@ -700,32 +816,43 @@ pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore
         }
     }
 
-    let expanded = expand_word_no_split(word, quoted, vars, script_file);
+    // Apply brace expansion first (only for unquoted words)
+    let brace_expanded = if quoted {
+        vec![word.to_string()]
+    } else {
+        expand_braces(word)
+    };
 
-    // Only skip word-splitting and globbing if the ENTIRE word was quoted.
-    // If the word has any unquoted parts (like "$DIR"/*.sh), we should still glob.
-    let should_skip_splitting = quoted && !has_unquoted_glob_chars(word);
+    // Now process each brace-expansion result
+    let mut final_result = Vec::new();
 
-    if should_skip_splitting {
-        return vec![expanded];
+    for expanded_word in brace_expanded {
+        let expanded = expand_word_no_split(&expanded_word, quoted, vars, script_file);
+
+        // Only skip word-splitting and globbing if the ENTIRE word was quoted.
+        // If the word has any unquoted parts (like "$DIR"/*.sh), we should still glob.
+        let should_skip_splitting = quoted && !has_unquoted_glob_chars(&expanded_word);
+
+        if should_skip_splitting {
+            final_result.push(expanded);
+        } else {
+            // Word split
+            let ifs = vars.get_str("IFS").unwrap_or_else(|| " \t\n".to_string());
+            let parts = word_split(&expanded, &ifs);
+
+            // Glob expansion
+            for part in parts {
+                let globbed = glob_expand(&part);
+                final_result.extend(globbed);
+            }
+        }
     }
 
-    // Word split
-    let ifs = vars.get_str("IFS").unwrap_or_else(|| " \t\n".to_string());
-    let parts = word_split(&expanded, &ifs);
-
-    // Glob expansion
-    let mut result = Vec::new();
-    for part in parts {
-        let globbed = glob_expand(&part);
-        result.extend(globbed);
-    }
-
-    if result.is_empty() && !expanded.is_empty() {
+    if final_result.is_empty() && !word.is_empty() {
         // Keep empty string if the expansion produced nothing useful
     }
 
-    result
+    final_result
 }
 
 pub fn expand_word_no_glob(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore, script_file: &str) -> Vec<String> {
@@ -1297,6 +1424,44 @@ fn expand_brace(chars: &[char], vars: &crate::shell::vars::VarStore, script_file
 }
 
 fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> String {
+    // Handle indirect expansion ${!VAR} or ${!prefix*} / ${!prefix@}
+    if content.starts_with('!') {
+        let rest = &content[1..];
+
+        // Check for ${!prefix*} or ${!prefix@} (list variable names)
+        if rest.ends_with('*') || rest.ends_with('@') {
+            let prefix = &rest[..rest.len()-1];
+            if !prefix.is_empty() && !prefix.contains('[') && !prefix.contains(']') {
+                // List all variables matching the prefix (not implemented yet, low priority)
+                // For now, return empty
+                return String::new();
+            }
+        }
+
+        // Indirect reference: ${!VAR} where VAR contains a variable name or numeric index
+        if !rest.is_empty() && !rest.contains('[') && !rest.contains(']') {
+            // Get the value of the indirection variable
+            let indirect_val = get_var_value(rest, vars, script_file);
+
+            // Try to interpret it as a numeric positional parameter index
+            if let Ok(idx) = indirect_val.parse::<usize>() {
+                if idx > 0 {
+                    // It's a numeric index, return the positional parameter at that index
+                    if let Some(val) = vars.get_str(&idx.to_string()) {
+                        return val;
+                    }
+                    return String::new();
+                }
+            }
+
+            // Otherwise, treat it as a variable name
+            if let Some(val) = vars.get_str(&indirect_val) {
+                return val;
+            }
+            return String::new();
+        }
+    }
+
     // Handle special parameter expansions
     // ${#VAR} - length
     if content.starts_with('#') {
