@@ -370,10 +370,13 @@ impl Parser {
 
     fn is_function_def(&self) -> bool {
         // NAME followed by ( ) or NAME followed by ()
+        // But NOT if NAME contains '=' (that's an assignment, not a function def)
         let mut i = self.pos;
         // Skip word
         if i >= self.tokens.len() { return false; }
         if !matches!(self.tokens[i].kind, TokKind::Word) { return false; }
+        // Check if word contains '=' - if so, it's an assignment, not a function def
+        if self.tokens[i].value.contains('=') { return false; }
         i += 1;
         if i >= self.tokens.len() { return false; }
         if self.tokens[i].kind != TokKind::LParen { return false; }
@@ -835,7 +838,7 @@ impl Parser {
     fn parse_simple_command(&mut self) -> Option<CmdNode> {
         let line = self.peek().line;
         let mut assigns = Vec::new();
-        let mut array_assigns: Vec<(String, Vec<String>)> = Vec::new();
+        let mut array_assigns: Vec<(String, Vec<String>, bool)> = Vec::new();
         let mut words = Vec::new();
         let mut redirs = Vec::new();
 
@@ -858,8 +861,8 @@ impl Parser {
                         } else {
                             (tok.value[..eq].to_string(), tok.value[eq + 1..].to_string())
                         };
-                        // Check for array literal: NAME=(elem1 elem2 ...) — only for plain =
-                        if !is_append && v.is_empty() && self.peek_kind() == &TokKind::LParen {
+                        // Check for array literal: NAME=(elem1 elem2 ...) or NAME+=(elem1 elem2 ...)
+                        if v.is_empty() && self.peek_kind() == &TokKind::LParen {
                             self.advance(); // consume '('
                             let mut elems = Vec::new();
                             loop {
@@ -876,7 +879,7 @@ impl Parser {
                                     }
                                 }
                             }
-                            array_assigns.push((k, elems));
+                            array_assigns.push((k, elems, is_append));
                         } else {
                             assigns.push((k, v, is_append));
                         }

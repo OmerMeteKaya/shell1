@@ -8,6 +8,7 @@ pub static G_INTERRUPT_LOOP: AtomicBool = AtomicBool::new(false);
 pub static G_PENDING_SIGNAL: AtomicI32 = AtomicI32::new(-1);  // signal number, -1 = none
 pub static G_FOREGROUND_PID: AtomicI32 = AtomicI32::new(-1);
 pub static G_EXIT_TRAP_RUNNING: AtomicBool = AtomicBool::new(false);
+pub static G_SIGNAL_TRAP_RUNNING: AtomicBool = AtomicBool::new(false);
 pub static G_PENDING_EXIT_STATUS: AtomicI32 = AtomicI32::new(0);
 pub static G_SHELL_PGID: AtomicI32 = AtomicI32::new(-1);
 
@@ -133,14 +134,22 @@ pub fn run_exit_trap(action: &str, vars: &crate::shell::vars::VarStore, script_f
 }
 
 pub fn check_and_run_trap(vars: &crate::shell::vars::VarStore, script_file: &str) -> bool {
+    // Re-entrancy guard: block recursive trap execution (e.g. kill inside a trap handler
+    // re-delivers the signal while the handler is still running)
+    if G_SIGNAL_TRAP_RUNNING.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return false;
+    }
+
     let sig_num = G_PENDING_SIGNAL.swap(-1, Ordering::SeqCst);
     if sig_num < 0 || sig_num >= 32 {
+        G_SIGNAL_TRAP_RUNNING.store(false, Ordering::SeqCst);
         return false;
     }
 
     let action = if let Ok(traps) = G_TRAP_ACTIONS.lock() {
         traps[sig_num as usize].clone()
     } else {
+        G_SIGNAL_TRAP_RUNNING.store(false, Ordering::SeqCst);
         return false;
     };
 
@@ -151,7 +160,9 @@ pub fn check_and_run_trap(vars: &crate::shell::vars::VarStore, script_file: &str
         ctx.script_file = script_file.to_string();
         ctx.exit_status = 0;
         crate::shell::executor::execute_list_with_vars(&nodes, &mut ctx, vars);
+        G_SIGNAL_TRAP_RUNNING.store(false, Ordering::SeqCst);
         return true;
     }
+    G_SIGNAL_TRAP_RUNNING.store(false, Ordering::SeqCst);
     false
 }

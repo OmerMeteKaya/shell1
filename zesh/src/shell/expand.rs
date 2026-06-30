@@ -595,6 +595,44 @@ fn arith_parse_primary(tokens: &[ATok], pos: &mut usize) -> Result<i64, String> 
     }
 }
 
+// Check if a word token (with quote markers like "$DIR"/*.sh) has any unquoted glob chars
+fn has_unquoted_glob_chars(word: &str) -> bool {
+    let chars: Vec<char> = word.chars().collect();
+    let mut i = 0;
+    let mut in_double_quotes = false;
+    let mut in_single_quotes = false;
+
+    while i < chars.len() {
+        match chars[i] {
+            '"' if !in_single_quotes => {
+                in_double_quotes = !in_double_quotes;
+                i += 1;
+            }
+            '\'' if !in_double_quotes => {
+                in_single_quotes = !in_single_quotes;
+                i += 1;
+            }
+            '\\' if !in_single_quotes => {
+                i += 2; // Skip escape sequence
+            }
+            '*' | '?' if !in_single_quotes && !in_double_quotes => {
+                return true;
+            }
+            '[' if !in_single_quotes && !in_double_quotes => {
+                // Check if this looks like a bracket expression (not escaped, has content)
+                if i + 1 < chars.len() && chars[i + 1] != ' ' {
+                    return true;
+                }
+                i += 1;
+            }
+            _ => {
+                i += 1;
+            }
+        }
+    }
+    false
+}
+
 // Expand a word token, returning list of strings (after word splitting + glob)
 pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore, script_file: &str) -> Vec<String> {
     // Special case: "$@" or "${@}" inside double quotes should expand to multiple words
@@ -610,9 +648,65 @@ pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore
         return result;
     }
 
+    // Special case: "${arr[@]}" inside double quotes should expand to multiple words
+    // Also handles "${arr[@]/pattern/replacement}" syntax
+    // But NOT "${#arr[@]}" which is array length (different expansion)
+    if quoted && word.starts_with("\"${") && word.ends_with("}\"") {
+        let inner = &word[3..word.len()-2]; // Strip "$ { and }"
+
+        // Check if it's a pattern substitution ${arr[@]/pat/repl}
+        if let Some(slash_pos) = inner.find('/') {
+            if inner[..slash_pos].ends_with("[@]") {
+                let arr_name_with_bracket = &inner[..slash_pos];
+                let arr_name = &arr_name_with_bracket[..arr_name_with_bracket.len()-3];
+                let rest = &inner[slash_pos+1..];
+                let (global, rest) = if rest.starts_with('/') {
+                    (true, &rest[1..])
+                } else {
+                    (false, rest)
+                };
+                let parts: Vec<&str> = rest.splitn(2, '/').collect();
+                let pat = parts[0];
+                let repl = if parts.len() > 1 { parts[1] } else { "" };
+
+                if let Some(arr) = vars.get_array(arr_name) {
+                    let mut keys: Vec<usize> = arr.keys().copied().collect();
+                    keys.sort();
+                    // Expand variables in the replacement string
+                    let expanded_repl = expand_string(repl, vars, script_file);
+                    let mut result = Vec::new();
+                    for k in keys {
+                        result.push(replace_pattern(&arr[&k], pat, &expanded_repl, global));
+                    }
+                    return result;
+                }
+                // Array doesn't exist, return empty
+                return vec![];
+            }
+        }
+
+        if inner.ends_with("[@]") && !inner.starts_with('#') {
+            let arr_name = &inner[..inner.len()-3];
+            if let Some(arr) = vars.get_array(arr_name) {
+                let mut keys: Vec<usize> = arr.keys().copied().collect();
+                keys.sort();
+                let mut result = Vec::new();
+                for k in keys {
+                    result.push(arr[&k].clone());
+                }
+                return result;
+            }
+            // Array doesn't exist, fall through to normal expansion
+        }
+    }
+
     let expanded = expand_word_no_split(word, quoted, vars, script_file);
 
-    if quoted {
+    // Only skip word-splitting and globbing if the ENTIRE word was quoted.
+    // If the word has any unquoted parts (like "$DIR"/*.sh), we should still glob.
+    let should_skip_splitting = quoted && !has_unquoted_glob_chars(word);
+
+    if should_skip_splitting {
         return vec![expanded];
     }
 
@@ -631,6 +725,76 @@ pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore
         // Keep empty string if the expansion produced nothing useful
     }
 
+    result
+}
+
+pub fn expand_word_no_glob(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore, script_file: &str) -> Vec<String> {
+    // The [[ ... ]] construct is lexed as a single token (bracket mode captures everything).
+    // We must split it by unquoted whitespace first, then expand each sub-token individually.
+    // This preserves empty variable expansions (e.g. $x when x="").
+    if word.starts_with("[[") {
+        return expand_bracket_test_token(word, vars, script_file);
+    }
+
+    // For test/[ commands, each token is already a separate word.
+    // Expand without word splitting or globbing — empty variables produce "".
+    if !quoted {
+        return vec![expand_string(word, vars, script_file)];
+    }
+
+    // Quoted token: single-element expansion (quotes already stripped by expand_string)
+    vec![expand_string(word, vars, script_file)]
+}
+
+fn expand_bracket_test_token(word: &str, vars: &crate::shell::vars::VarStore, script_file: &str) -> Vec<String> {
+    // Split the [[ ... ]] single-token by unquoted whitespace, then expand each part.
+    // This correctly handles empty variable expansions within [[ ]] tests.
+    let chars: Vec<char> = word.chars().collect();
+    let mut result = Vec::new();
+    let mut i = 0;
+    let mut in_double_quote = false;
+    let mut in_single_quote = false;
+    let mut current = String::new();
+    let mut in_token = false;
+
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            ' ' | '\t' if !in_double_quote && !in_single_quote => {
+                if in_token {
+                    result.push(expand_string(&current, vars, script_file));
+                    current.clear();
+                    in_token = false;
+                }
+            }
+            '"' if !in_single_quote => {
+                in_double_quote = !in_double_quote;
+                current.push(c);
+                in_token = true;
+            }
+            '\'' if !in_double_quote => {
+                in_single_quote = !in_single_quote;
+                current.push(c);
+                in_token = true;
+            }
+            '\\' if !in_single_quote => {
+                current.push(c);
+                in_token = true;
+                i += 1;
+                if i < chars.len() {
+                    current.push(chars[i]);
+                }
+            }
+            _ => {
+                current.push(c);
+                in_token = true;
+            }
+        }
+        i += 1;
+    }
+    if in_token {
+        result.push(expand_string(&current, vars, script_file));
+    }
     result
 }
 
@@ -1255,35 +1419,9 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         }
     }
 
-    // Array expansion ${ARR[idx]} or ${ARR[@]}
-    if let Some(bracket_pos) = content.find('[') {
-        let name = &content[..bracket_pos];
-        let rest = &content[bracket_pos+1..];
-        if let Some(end) = rest.find(']') {
-            let idx_str = &rest[..end];
-            if idx_str == "@" || idx_str == "*" {
-                // Expand all elements
-                if let Some(arr) = vars.get_array(name) {
-                    let mut keys: Vec<usize> = arr.keys().copied().collect();
-                    keys.sort();
-                    return keys.iter().map(|k| arr[k].clone()).collect::<Vec<_>>().join(" ");
-                }
-                return String::new();
-            }
-            // Arithmetic index
-            let idx = match eval_arith_expr_with_vars(idx_str, vars) {
-                Ok(n) => n as usize,
-                Err(_) => 0,
-            };
-            if let Some(arr) = vars.get_array(name) {
-                return arr.get(&idx).cloned().unwrap_or_default();
-            }
-            return String::new();
-        }
-    }
-
     // Pattern removal ${VAR#pat}, ${VAR##pat}, ${VAR%pat}, ${VAR%%pat}
     // ${VAR/pat/repl}, ${VAR//pat/repl}
+    // Process this BEFORE array indexing to handle ${arr[@]/pat/repl}
     for (i, c) in content.char_indices() {
         match c {
             '#' if i > 0 => {
@@ -1311,7 +1449,6 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
             '/' if i > 0 => {
                 let name = &content[..i];
                 let rest = &content[i+1..];
-                let val = get_var_value(name, vars, script_file);
                 let (global, rest) = if rest.starts_with('/') {
                     (true, &rest[1..])
                 } else {
@@ -1320,9 +1457,57 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
                 let parts: Vec<&str> = rest.splitn(2, '/').collect();
                 let pat = parts[0];
                 let repl = if parts.len() > 1 { parts[1] } else { "" };
-                return replace_pattern(&val, pat, repl, global);
+
+                // Check if this is array substitution ${arr[@]/pat/repl}
+                if (name.ends_with("[@]") || name.ends_with("[*]")) && name.len() > 3 {
+                    let arr_name = &name[..name.len()-3];
+                    if let Some(arr) = vars.get_array(arr_name) {
+                        let mut keys: Vec<usize> = arr.keys().copied().collect();
+                        keys.sort();
+                        // Expand variables in the replacement string
+                        let expanded_repl = expand_string(repl, vars, script_file);
+                        let replaced: Vec<String> = keys.iter()
+                            .map(|k| replace_pattern(&arr[k], pat, &expanded_repl, global))
+                            .collect();
+                        return replaced.join(" ");
+                    }
+                    return String::new();
+                }
+
+                // Scalar substitution
+                let val = get_var_value(name, vars, script_file);
+                // Expand variables in the replacement string
+                let expanded_repl = expand_string(repl, vars, script_file);
+                return replace_pattern(&val, pat, &expanded_repl, global);
             }
             _ => {}
+        }
+    }
+
+    // Array expansion ${ARR[idx]} or ${ARR[@]}
+    if let Some(bracket_pos) = content.find('[') {
+        let name = &content[..bracket_pos];
+        let rest = &content[bracket_pos+1..];
+        if let Some(end) = rest.find(']') {
+            let idx_str = &rest[..end];
+            if idx_str == "@" || idx_str == "*" {
+                // Expand all elements
+                if let Some(arr) = vars.get_array(name) {
+                    let mut keys: Vec<usize> = arr.keys().copied().collect();
+                    keys.sort();
+                    return keys.iter().map(|k| arr[k].clone()).collect::<Vec<_>>().join(" ");
+                }
+                return String::new();
+            }
+            // Arithmetic index
+            let idx = match eval_arith_expr_with_vars(idx_str, vars) {
+                Ok(n) => n as usize,
+                Err(_) => 0,
+            };
+            if let Some(arr) = vars.get_array(name) {
+                return arr.get(&idx).cloned().unwrap_or_default();
+            }
+            return String::new();
         }
     }
 
@@ -1595,6 +1780,80 @@ fn glob_match_chars(pat: &[char], pi: usize, s: &[char], si: usize) -> bool {
     if pi >= pat.len() {
         return si >= s.len();
     }
+
+    // Extglob constructs: @( *( +( ?( !(
+    if pi + 1 < pat.len() && matches!(pat[pi], '@' | '*' | '+' | '?' | '!') && pat[pi + 1] == '(' {
+        let kind = pat[pi];
+        if let Some(close) = extglob_find_close(pat, pi + 1) {
+            let alts = extglob_split_alts(pat, pi + 2, close);
+            let rest_pi = close + 1;
+            return match kind {
+                '@' => {
+                    // Exactly one match of any alternative
+                    for n in 0..=(s.len().saturating_sub(si)) {
+                        let sub: Vec<char> = s[si..si + n].to_vec();
+                        for alt in &alts {
+                            if glob_match_chars(alt, 0, &sub, 0)
+                                && glob_match_chars(pat, rest_pi, s, si + n)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    false
+                }
+                '?' => {
+                    // Zero or one match of any alternative
+                    if glob_match_chars(pat, rest_pi, s, si) {
+                        return true;
+                    }
+                    for n in 1..=(s.len().saturating_sub(si)) {
+                        let sub: Vec<char> = s[si..si + n].to_vec();
+                        for alt in &alts {
+                            if glob_match_chars(alt, 0, &sub, 0)
+                                && glob_match_chars(pat, rest_pi, s, si + n)
+                            {
+                                return true;
+                            }
+                        }
+                    }
+                    false
+                }
+                '*' => extglob_zero_or_more(&alts, rest_pi, pat, s, si),
+                '+' => {
+                    // One or more matches of any alternative
+                    for n in 1..=(s.len().saturating_sub(si)) {
+                        let sub: Vec<char> = s[si..si + n].to_vec();
+                        for alt in &alts {
+                            if glob_match_chars(alt, 0, &sub, 0) {
+                                // After one mandatory match, allow zero or more more
+                                if glob_match_chars(pat, rest_pi, s, si + n)
+                                    || extglob_zero_or_more(&alts, rest_pi, pat, s, si + n)
+                                {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                    false
+                }
+                '!' => {
+                    // Anything that doesn't match any alternative
+                    for n in 0..=(s.len().saturating_sub(si)) {
+                        let sub: Vec<char> = s[si..si + n].to_vec();
+                        let matches_any = alts.iter().any(|alt| glob_match_chars(alt, 0, &sub, 0));
+                        if !matches_any && glob_match_chars(pat, rest_pi, s, si + n) {
+                            return true;
+                        }
+                    }
+                    false
+                }
+                _ => false,
+            };
+        }
+        // Malformed extglob (no matching ')') — fall through to literal match
+    }
+
     match pat[pi] {
         '*' => {
             // Try matching zero or more characters
@@ -1632,7 +1891,41 @@ fn glob_match_chars(pat: &[char], pi: usize, s: &[char], si: usize) -> bool {
                 first = true;
                 while pi2 < pat.len() && (first || pat[pi2] != ']') {
                     first = false;
-                    if pi2 + 2 < pat.len() && pat[pi2 + 1] == '-' && pat[pi2 + 2] != ']' {
+                    // POSIX character class [:alpha:] etc.
+                    if pi2 + 1 < pat.len() && pat[pi2] == '[' && pat[pi2 + 1] == ':' {
+                        let class_start = pi2 + 2;
+                        let mut class_end = class_start;
+                        while class_end + 1 < pat.len()
+                            && !(pat[class_end] == ':' && pat[class_end + 1] == ']')
+                        {
+                            class_end += 1;
+                        }
+                        if class_end + 1 < pat.len() {
+                            let class_name: String = pat[class_start..class_end].iter().collect();
+                            if si < s.len() {
+                                let c = s[si];
+                                if match class_name.as_str() {
+                                    "alpha"  => c.is_alphabetic(),
+                                    "digit"  => c.is_ascii_digit(),
+                                    "alnum"  => c.is_alphanumeric(),
+                                    "space"  => c.is_whitespace(),
+                                    "upper"  => c.is_uppercase(),
+                                    "lower"  => c.is_lowercase(),
+                                    "print"  => !c.is_control(),
+                                    "blank"  => c == ' ' || c == '\t',
+                                    "punct"  => c.is_ascii_punctuation(),
+                                    "cntrl"  => c.is_control(),
+                                    "xdigit" => c.is_ascii_hexdigit(),
+                                    _        => false,
+                                } { matched = true; }
+                            }
+                            pi2 = class_end + 2; // skip past `:]`
+                        } else {
+                            // Malformed POSIX class — treat [ as literal
+                            if si < s.len() && s[si] == '[' { matched = true; }
+                            pi2 += 1;
+                        }
+                    } else if pi2 + 2 < pat.len() && pat[pi2 + 1] == '-' && pat[pi2 + 2] != ']' {
                         if si < s.len() && s[si] >= pat[pi2] && s[si] <= pat[pi2 + 2] {
                             matched = true;
                         }
@@ -1659,6 +1952,62 @@ fn glob_match_chars(pat: &[char], pi: usize, s: &[char], si: usize) -> bool {
             si < s.len() && s[si] == c && glob_match_chars(pat, pi + 1, s, si + 1)
         }
     }
+}
+
+fn extglob_find_close(pat: &[char], start: usize) -> Option<usize> {
+    // pat[start] is '(' — find the matching ')'
+    let mut depth = 1i32;
+    let mut i = start + 1;
+    while i < pat.len() {
+        match pat[i] {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 { return Some(i); }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn extglob_split_alts(pat: &[char], start: usize, end: usize) -> Vec<Vec<char>> {
+    // Split pat[start..end] by '|' at paren-depth 0
+    let mut alts: Vec<Vec<char>> = Vec::new();
+    let mut depth = 0i32;
+    let mut seg_start = start;
+    for i in start..end {
+        match pat[i] {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            '|' if depth == 0 => {
+                alts.push(pat[seg_start..i].to_vec());
+                seg_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    alts.push(pat[seg_start..end].to_vec());
+    alts
+}
+
+fn extglob_zero_or_more(alts: &[Vec<char>], rest_pi: usize, pat: &[char], s: &[char], si: usize) -> bool {
+    // Match zero or more repetitions of any alternative, then rest_pi pattern
+    if glob_match_chars(pat, rest_pi, s, si) {
+        return true;
+    }
+    for n in 1..=(s.len().saturating_sub(si)) {
+        let sub: Vec<char> = s[si..si + n].to_vec();
+        for alt in alts {
+            if glob_match_chars(alt, 0, &sub, 0)
+                && extglob_zero_or_more(alts, rest_pi, pat, s, si + n)
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn expand_backtick(chars: &[char], start: usize, vars: &crate::shell::vars::VarStore, script_file: &str) -> (String, usize) {

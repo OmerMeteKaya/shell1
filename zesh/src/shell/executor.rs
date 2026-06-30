@@ -514,6 +514,21 @@ fn execute_simple(
         }
     };
 
+    // (( expr )) arithmetic command: evaluate without word expansion or forking
+    if !cmd.words.is_empty() && cmd.words[0].value.starts_with("((") && cmd.words[0].value.ends_with("))") {
+        let tok_val = &cmd.words[0].value;
+        let expr = &tok_val[2..tok_val.len() - 2];
+        let status = match crate::shell::expand::eval_arith_expr_with_vars(expr.trim(), vars) {
+            Ok(0) => 1,  // zero value = false
+            Ok(_) => 0,  // non-zero value = true
+            Err(_) => 1,
+        };
+        restore_redirections(early_saved);
+        ctx.exit_status = status;
+        vars.set_raw("?", status.to_string(), 0);
+        return status;
+    }
+
     // Expand assignments
     let mut local_assigns: Vec<(String, String)> = Vec::new();
     for (k, v, is_append) in &cmd.assigns {
@@ -537,9 +552,21 @@ fn execute_simple(
     }
 
     // Expand words
+    // Special handling for [[ ]] tests: skip pathname globbing
+    let is_test_command = !cmd.words.is_empty() && (
+        cmd.words[0].value.starts_with("[[") ||  // [[ ]] test construct
+        cmd.words[0].value == "test" ||
+        cmd.words[0].value == "["
+    );
+
     let mut argv: Vec<String> = Vec::new();
     for tok in &cmd.words {
-        let expanded = expand_token(tok, vars, &ctx.script_file);
+        let expanded = if is_test_command {
+            // For test commands, skip pathname globbing
+            crate::shell::expand::expand_word_no_glob(&tok.value, tok.quoted, vars, &ctx.script_file)
+        } else {
+            expand_token(tok, vars, &ctx.script_file)
+        };
         // Apply any := assignments from expansion
         for (an, av) in crate::shell::expand::take_param_assigns() {
             vars.set(&an, av);
@@ -568,12 +595,26 @@ fn execute_simple(
                 assign_status = 1;
             }
         }
-        // Process array literal assignments ARR=(elem1 elem2 ...)
-        for (arr_name, elems) in &cmd.array_assigns {
-            vars.arrays.remove(arr_name);
-            for (idx, elem) in elems.iter().enumerate() {
-                let expanded = expand_string(elem, vars, &ctx.script_file);
-                vars.set_array_elem(arr_name, idx, expanded);
+        // Process array literal assignments ARR=(elem1 elem2 ...) or ARR+=(elem1 elem2 ...)
+        for (arr_name, elems, is_append) in &cmd.array_assigns {
+            if !is_append {
+                vars.arrays.remove(arr_name);
+            }
+            let start_idx = if *is_append {
+                let existing = vars.arrays.get(arr_name).cloned().unwrap_or_default();
+                existing.len()
+            } else {
+                0
+            };
+            let mut current_idx = start_idx;
+            for elem in elems.iter() {
+                // Use expand_word to properly handle ${arr[@]/pattern/replacement}
+                // which should expand to multiple elements in an array context
+                let expanded_parts = crate::shell::expand::expand_word(elem, true, vars, &ctx.script_file);
+                for part in expanded_parts {
+                    vars.set_array_elem(arr_name, current_idx, part);
+                    current_idx += 1;
+                }
             }
         }
         // Apply redirections without command
@@ -1761,7 +1802,8 @@ fn try_builtin(
         "true" | ":" => Some(0),
         "false" => Some(1),
         "test" | "[" => Some(builtin_test(args)),
-        "[[" | "]]" => Some(0), // handled in parser
+        "[[" => Some(builtin_test_pattern(args)), // [[ uses glob/pattern matching for = and !=
+        "]]" => Some(0), // closing bracket, shouldn't be called directly
         "eval" => Some(builtin_eval(args, redirs, ctx, vars)),
         "type" => {
             let status = builtin_type(args, vars);

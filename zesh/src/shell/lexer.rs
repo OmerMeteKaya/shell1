@@ -596,6 +596,57 @@ impl Lexer {
                         None => {}
                     }
                 }
+                // Extglob constructs: @( *( +( ?( !(
+                // Must come BEFORE bracket-mode and word-break handling so that
+                // [[:alpha:]] inside *([[:alpha:]]) doesn't prematurely close the [[ bracket,
+                // and ( ) | inside extglob aren't treated as shell metacharacters.
+                Some(c) if matches!(c, '@' | '*' | '+' | '?' | '!') && self.peek2() == Some('(') => {
+                    value.push(c);
+                    self.advance();
+                    value.push('(');
+                    self.advance(); // consume '('
+                    let mut extglob_depth = 1i32;
+                    while extglob_depth > 0 {
+                        match self.peek() {
+                            None => break,
+                            Some('(') => { extglob_depth += 1; value.push('('); self.advance(); }
+                            Some(')') => { extglob_depth -= 1; value.push(')'); self.advance(); }
+                            Some('\'') => {
+                                self.advance();
+                                let sq = self.read_single_quoted();
+                                value.push('\''); value.push_str(&sq); value.push('\'');
+                            }
+                            Some('"') => {
+                                self.advance();
+                                let dq = self.read_double_quoted();
+                                value.push('"'); value.push_str(&dq); value.push('"');
+                            }
+                            Some('$') => {
+                                value.push(self.advance().unwrap());
+                                match self.peek() {
+                                    Some('{') => {
+                                        value.push(self.advance().unwrap());
+                                        let body = self.read_brace_expansion();
+                                        value.push_str(&body); value.push('}');
+                                    }
+                                    Some('(') => {
+                                        value.push(self.advance().unwrap());
+                                        let body = self.read_paren_body();
+                                        value.push_str(&body); value.push(')');
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            Some('\\') => {
+                                self.advance();
+                                if let Some(nc) = self.advance() {
+                                    value.push('\\'); value.push(nc);
+                                }
+                            }
+                            Some(c2) => { value.push(c2); self.advance(); }
+                        }
+                    }
+                }
                 // Bracket expressions: handle [ and ] for glob patterns
                 // These must come AFTER quote/expansion handling so [0] inside "${x[0]}" works
                 // IMPORTANT: Don't enter bracket mode if [ is followed by whitespace,
@@ -697,8 +748,21 @@ impl Lexer {
                     }
                 }
                 Some('(') => {
-                    self.advance();
-                    tokens.push(Token { kind: TokKind::LParen, value: "(".to_string(), quoted: false, line });
+                    if self.input.get(self.pos + 1) == Some(&'(') {
+                        // (( expr )) arithmetic command — emit as a single Word token
+                        self.advance(); // first (
+                        self.advance(); // second (
+                        let body = self.read_double_paren();
+                        tokens.push(Token {
+                            kind: TokKind::Word,
+                            value: format!("(({body}))"),
+                            quoted: false,
+                            line,
+                        });
+                    } else {
+                        self.advance();
+                        tokens.push(Token { kind: TokKind::LParen, value: "(".to_string(), quoted: false, line });
+                    }
                 }
                 Some(')') => {
                     self.advance();

@@ -885,7 +885,18 @@ pub fn builtin_source(args: &[String], ctx: &mut ExecContext, vars: &mut VarStor
     match std::fs::read(path) {
         Ok(bytes) => {
             let content = String::from_utf8_lossy(&bytes).into_owned();
-            crate::shell::executor::run_script(&content, path, ctx, vars)
+            // Save the returning flag: a return inside sourced script should not affect caller
+            let saved_returning = ctx.returning;
+            let saved_return_value = ctx.return_value;
+            ctx.returning = false;
+
+            let status = crate::shell::executor::run_script(&content, path, ctx, vars);
+
+            // Restore the returning flag so caller's execution isn't affected
+            ctx.returning = saved_returning;
+            ctx.return_value = saved_return_value;
+
+            status
         }
         Err(e) => {
             eprintln!("zesh: {}: {}", path, e);
@@ -895,18 +906,30 @@ pub fn builtin_source(args: &[String], ctx: &mut ExecContext, vars: &mut VarStor
 }
 
 pub fn builtin_test(args: &[String]) -> i32 {
-    // Remove trailing ] if present
-    let args: Vec<&str> = if args.last().map(|s| s.as_str()) == Some("]") {
-        args[..args.len()-1].iter().map(|s| s.as_str()).collect()
+    builtin_test_impl(args, false)
+}
+
+pub fn builtin_test_pattern(args: &[String]) -> i32 {
+    builtin_test_impl(args, true)
+}
+
+fn builtin_test_impl(args: &[String], is_pattern: bool) -> i32 {
+    // Remove trailing ] or ]] if present
+    let args: Vec<&str> = if let Some(last) = args.last().map(|s| s.as_str()) {
+        if last == "]" || last == "]]" {
+            args[..args.len()-1].iter().map(|s| s.as_str()).collect()
+        } else {
+            args.iter().map(|s| s.as_str()).collect()
+        }
     } else {
         args.iter().map(|s| s.as_str()).collect()
     };
 
-    let result = eval_test_expr(&args, &mut 0);
+    let result = eval_test_expr(&args, &mut 0, is_pattern);
     if result { 0 } else { 1 }
 }
 
-fn eval_test_expr(args: &[&str], pos: &mut usize) -> bool {
+fn eval_test_expr(args: &[&str], pos: &mut usize, is_pattern: bool) -> bool {
     if *pos >= args.len() {
         return false;
     }
@@ -914,43 +937,43 @@ fn eval_test_expr(args: &[&str], pos: &mut usize) -> bool {
     // Handle ! negation
     if args[*pos] == "!" {
         *pos += 1;
-        return !eval_test_expr(args, pos);
+        return !eval_test_expr(args, pos, is_pattern);
     }
 
     // Handle ( )
     if args[*pos] == "(" {
         *pos += 1;
-        let result = eval_test_or(args, pos);
+        let result = eval_test_or(args, pos, is_pattern);
         if *pos < args.len() && args[*pos] == ")" {
             *pos += 1;
         }
         return result;
     }
 
-    eval_test_or(args, pos)
+    eval_test_or(args, pos, is_pattern)
 }
 
-fn eval_test_or(args: &[&str], pos: &mut usize) -> bool {
-    let mut left = eval_test_and(args, pos);
-    while *pos + 1 < args.len() && args[*pos] == "-o" {
+fn eval_test_or(args: &[&str], pos: &mut usize, is_pattern: bool) -> bool {
+    let mut left = eval_test_and(args, pos, is_pattern);
+    while *pos + 1 < args.len() && (args[*pos] == "-o" || args[*pos] == "||") {
         *pos += 1;
-        let right = eval_test_and(args, pos);
+        let right = eval_test_and(args, pos, is_pattern);
         left = left || right;
     }
     left
 }
 
-fn eval_test_and(args: &[&str], pos: &mut usize) -> bool {
-    let mut left = eval_test_unary(args, pos);
-    while *pos + 1 < args.len() && args[*pos] == "-a" {
+fn eval_test_and(args: &[&str], pos: &mut usize, is_pattern: bool) -> bool {
+    let mut left = eval_test_unary(args, pos, is_pattern);
+    while *pos + 1 < args.len() && (args[*pos] == "-a" || args[*pos] == "&&") {
         *pos += 1;
-        let right = eval_test_unary(args, pos);
+        let right = eval_test_unary(args, pos, is_pattern);
         left = left && right;
     }
     left
 }
 
-fn eval_test_unary(args: &[&str], pos: &mut usize) -> bool {
+fn eval_test_unary(args: &[&str], pos: &mut usize, is_pattern: bool) -> bool {
     if *pos >= args.len() {
         return false;
     }
@@ -962,8 +985,23 @@ fn eval_test_unary(args: &[&str], pos: &mut usize) -> bool {
         let b = args[*pos + 2];
 
         match op {
-            "=" | "==" => { *pos += 3; return a == b; }
-            "!=" => { *pos += 3; return a != b; }
+            "=" | "==" => {
+                *pos += 3;
+                // [[ ]] uses glob/pattern matching; [ ] and test use string equality
+                return if is_pattern {
+                    crate::shell::expand::glob_match(b, a)
+                } else {
+                    a == b
+                };
+            }
+            "!=" => {
+                *pos += 3;
+                return if is_pattern {
+                    !crate::shell::expand::glob_match(b, a)
+                } else {
+                    a != b
+                };
+            }
             "-eq" => {
                 let na: i64 = a.trim().parse().unwrap_or(0);
                 let nb: i64 = b.trim().parse().unwrap_or(0);
@@ -1584,7 +1622,6 @@ pub fn builtin_kill(args: &[String]) -> i32 {
 
 pub fn builtin_trap(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
     if args.is_empty() {
-        // List traps
         return 0;
     }
 
@@ -1592,22 +1629,36 @@ pub fn builtin_trap(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore)
         return 0;
     }
 
-    // trap ACTION SIGNAL...
-    let action = &args[0];
-    let signals = &args[1..];
+    // Strip -- option terminator
+    let args = if args[0] == "--" { &args[1..] } else { &args[..] };
+
+    if args.is_empty() {
+        return 0;
+    }
+
+    // POSIX: trap [action] [signals...]
+    // When only one argument remains (no action), reset that signal to default.
+    // This handles `trap -- SIGNAL` and the old-form `trap SIGNAL`.
+    let (action, signals): (&str, &[String]) = if args.len() == 1 {
+        ("-", &args[0..1])
+    } else {
+        (&args[0], &args[1..])
+    };
 
     if signals.is_empty() {
         return 0;
     }
 
+    let is_reset = action == "-" || action == "--";
+
     for sig in signals {
         let sig_num = match sig.as_str() {
             "EXIT" | "0" => {
                 if let Ok(mut trap) = crate::shell::signals::G_TRAP_EXIT.lock() {
-                    if action == "-" || action.is_empty() {
+                    if is_reset || action.is_empty() {
                         *trap = None;
                     } else {
-                        *trap = Some(action.clone());
+                        *trap = Some(action.to_string());
                     }
                 }
                 continue;
@@ -1625,10 +1676,18 @@ pub fn builtin_trap(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore)
 
         if let Ok(mut traps) = crate::shell::signals::G_TRAP_ACTIONS.lock() {
             if (sig_num as usize) < traps.len() {
-                if action == "-" || action.is_empty() {
+                if is_reset || action.is_empty() {
                     traps[sig_num as usize] = None;
+                    // Restore the OS default signal disposition so kill -SIGNAL $$ works
+                    // SAFETY: sigaction with SIG_DFL is always safe
+                    unsafe {
+                        let mut sa: libc::sigaction = std::mem::zeroed();
+                        sa.sa_sigaction = libc::SIG_DFL;
+                        libc::sigemptyset(&mut sa.sa_mask);
+                        libc::sigaction(sig_num, &sa, std::ptr::null_mut());
+                    }
                 } else {
-                    traps[sig_num as usize] = Some(action.clone());
+                    traps[sig_num as usize] = Some(action.to_string());
                 }
             }
         }
