@@ -3,8 +3,36 @@
 use std::io::{self, Write, BufRead};
 use crate::shell::types::FdRedir;
 use crate::shell::executor::{ExecContext, LoopControl};
-use crate::shell::vars::{VarStore, ATTR_READONLY, ATTR_INTEGER, ATTR_UPPERCASE, ATTR_LOWERCASE, ATTR_EXPORT, ATTR_LOCAL};
+use crate::shell::vars::{VarStore, ATTR_READONLY, ATTR_INTEGER, ATTR_UPPERCASE, ATTR_LOWERCASE, ATTR_EXPORT, ATTR_LOCAL, ATTR_NAMEREF};
 use crate::shell::expand::{expand_string, eval_arith_simple};
+
+// Check if a string looks like an arithmetic expression (for array indices)
+fn looks_like_arithmetic_idx(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() { return false; }
+
+    // If it contains arithmetic operators, it's arithmetic
+    if s.contains('+') || s.contains('-') || s.contains('*') || s.contains('/')
+        || s.contains('%') || s.contains('(') || s.contains(')') || s.contains('&')
+        || s.contains('|') || s.contains('^') || s.contains('~') || s.contains('<')
+        || s.contains('>') || s.contains('=') || s.contains('!') || s.contains('?')
+        || s.contains(':') {
+        return true;
+    }
+
+    // If it's purely digits, it's arithmetic
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+
+    // If it starts with a digit, it might be arithmetic (e.g., "123abc")
+    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        return true;
+    }
+
+    // Otherwise it looks like a string/identifier
+    false
+}
 
 pub fn builtin_echo(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
     use crate::shell::executor::apply_redirections_for_builtin;
@@ -49,35 +77,59 @@ fn interpret_escape_seq(s: &str) -> String {
         if chars[i] == '\\' && i + 1 < chars.len() {
             i += 1;
             match chars[i] {
-                'n'  => result.push('\n'),
-                't'  => result.push('\t'),
-                'r'  => result.push('\r'),
-                'a'  => result.push('\x07'),
-                'b'  => result.push('\x08'),
-                'e' | 'E' => result.push('\x1b'),
-                'f'  => result.push('\x0c'),
-                'v'  => result.push('\x0b'),
-                '\\' => result.push('\\'),
-                '0' => {
-                    let mut oct = String::new();
-                    i += 1;
-                    while i < chars.len() && oct.len() < 3 && chars[i] >= '0' && chars[i] <= '7' {
-                        oct.push(chars[i]);
-                        i += 1;
-                    }
-                    if let Ok(n) = u32::from_str_radix(&oct, 8) {
-                        if let Some(c) = char::from_u32(n) {
-                            result.push(c);
+                'n'  => { result.push('\n'); i += 1; }
+                't'  => { result.push('\t'); i += 1; }
+                'r'  => { result.push('\r'); i += 1; }
+                'a'  => { result.push('\x07'); i += 1; }
+                'b'  => { result.push('\x08'); i += 1; }
+                'e' | 'E' => { result.push('\x1b'); i += 1; }
+                'f'  => { result.push('\x0c'); i += 1; }
+                'v'  => { result.push('\x0b'); i += 1; }
+                '\\' => { result.push('\\'); i += 1; }
+                '0'..='7' => {
+                    let mut val: u32 = 0;
+                    let mut digits = 0;
+                    while digits < 3 {
+                        if let Some(d) = chars.get(i).and_then(|c| c.to_digit(8)) {
+                            val = val * 8 + d;
+                            i += 1;
+                            digits += 1;
+                        } else {
+                            break;
                         }
                     }
-                    continue;
+                    if let Some(c) = char::from_u32(val) {
+                        result.push(c);
+                    }
                 }
-                c    => { result.push('\\'); result.push(c); }
+                'x' => {
+                    i += 1;
+                    let mut val: u32 = 0;
+                    let mut digits = 0;
+                    while digits < 2 {
+                        if let Some(d) = chars.get(i).and_then(|c| c.to_digit(16)) {
+                            val = val * 16 + d;
+                            i += 1;
+                            digits += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if digits > 0 {
+                        if let Some(c) = char::from_u32(val) {
+                            result.push(c);
+                        }
+                    } else {
+                        result.push('\\');
+                        result.push('x');
+                    }
+                }
+                c    => { result.push('\\'); result.push(c); i += 1; }
             }
         } else {
             result.push(chars[i]);
+            i += 1;
         }
-        i += 1;
     }
     result
 }
@@ -91,11 +143,30 @@ pub fn builtin_printf(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext
         return 1;
     }
 
-    let fmt = &args[0];
-    let mut remaining = &args[1..];
+    // Parse -v varname flag
+    let (var_target, fmt_args) = if args[0] == "-v" {
+        if args.len() < 3 {
+            eprintln!("zesh: printf: -v requires a variable name and format string");
+            crate::shell::executor::restore_redirections_builtin(saved);
+            return 1;
+        }
+        (Some(args[1].clone()), &args[2..])
+    } else {
+        (None, &args[0..])
+    };
+
+    if fmt_args.is_empty() {
+        crate::shell::executor::restore_redirections_builtin(saved);
+        return 1;
+    }
+
+    let fmt = &fmt_args[0];
+    let mut remaining = &fmt_args[1..];
+    let mut full_output = String::new();
+
     loop {
         let (output, consumed) = printf_format(fmt, remaining);
-        print!("{}", output);
+        full_output.push_str(&output);
         // POSIX: repeat the format for each batch of remaining args.
         // Stop when no specifiers were consumed (format has no conversion specs)
         // or when all args are exhausted.
@@ -107,7 +178,13 @@ pub fn builtin_printf(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext
             break;
         }
     }
-    let _ = io::stdout().flush();
+
+    if let Some(varname) = var_target {
+        vars.set(&varname, full_output);
+    } else {
+        print!("{}", full_output);
+        let _ = io::stdout().flush();
+    }
 
     crate::shell::executor::restore_redirections_builtin(saved);
     0
@@ -126,7 +203,50 @@ fn printf_format(fmt: &str, args: &[String]) -> (String, usize) {
                 'n'  => { result.push('\n'); i += 1; }
                 't'  => { result.push('\t'); i += 1; }
                 'r'  => { result.push('\r'); i += 1; }
+                'a'  => { result.push('\x07'); i += 1; }
+                'b'  => { result.push('\x08'); i += 1; }
+                'f'  => { result.push('\x0C'); i += 1; }
+                'v'  => { result.push('\x0B'); i += 1; }
                 '\\' => { result.push('\\'); i += 1; }
+                '0'..='7' => {
+                    let mut val: u32 = 0;
+                    let mut digits = 0;
+                    while digits < 3 {
+                        if let Some(d) = chars.get(i).and_then(|c| c.to_digit(8)) {
+                            val = val * 8 + d;
+                            i += 1;
+                            digits += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if let Some(ch) = char::from_u32(val) {
+                        result.push(ch);
+                    }
+                }
+                'x' => {
+                    i += 1;
+                    let mut val: u32 = 0;
+                    let mut digits = 0;
+                    while digits < 2 {
+                        if let Some(d) = chars.get(i).and_then(|c| c.to_digit(16)) {
+                            val = val * 16 + d;
+                            i += 1;
+                            digits += 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    if digits > 0 {
+                        if let Some(ch) = char::from_u32(val) {
+                            result.push(ch);
+                        }
+                    } else {
+                        result.push('\\');
+                        result.push('x');
+                    }
+                }
+                'e' => { result.push('\x1B'); i += 1; }
                 '\0' => {}
                 c    => { result.push('\\'); result.push(c); i += 1; }
             }
@@ -521,14 +641,22 @@ pub fn builtin_unset(args: &[String], vars: &mut VarStore) -> i32 {
                 if flags_f {
                     vars.functions.remove(name);
                 } else if let Some(bracket) = name.find('[') {
-                    // unset arr[N] — remove a single array element
+                    // unset arr[N] or arr[key] — remove a single array element
                     if name.ends_with(']') {
                         let arr_name = &name[..bracket];
                         let idx_str = &name[bracket+1..name.len()-1];
-                        if let Ok(idx) = crate::shell::expand::eval_arith_simple(idx_str) {
-                            if let Some(arr) = vars.arrays.get_mut(arr_name) {
-                                arr.remove(&(idx as usize));
+                        // Try as arithmetic index first (for numeric arrays), otherwise use as string key (for assoc arrays)
+                        let key = if looks_like_arithmetic_idx(idx_str) {
+                            if let Ok(idx) = crate::shell::expand::eval_arith_simple(idx_str) {
+                                idx.to_string()
+                            } else {
+                                idx_str.to_string()
                             }
+                        } else {
+                            idx_str.to_string()
+                        };
+                        if let Some(arr) = vars.arrays.get_mut(arr_name) {
+                            arr.remove(&key);
                         }
                     }
                 } else {
@@ -599,30 +727,40 @@ pub fn builtin_local(args: &[String], vars: &mut VarStore) -> i32 {
     0
 }
 
-pub fn builtin_declare(args: &[String], vars: &mut VarStore) -> i32 {
+pub fn builtin_declare(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
+    use crate::shell::executor::apply_redirections_for_builtin;
+    let saved = apply_redirections_for_builtin(redirs, ctx, vars);
     let mut print_mode = false;
+    let mut func_mode = false;
     let mut attrs_to_set: u32 = 0;
     let mut i = 0;
 
     while i < args.len() {
         match args[i].as_str() {
             "-p" => { print_mode = true; }
+            "-f" => { func_mode = true; }
+            "-F" => { func_mode = true; } // print only names
             "-r" => { attrs_to_set |= ATTR_READONLY; }
             "-i" => { attrs_to_set |= ATTR_INTEGER; }
             "-u" => { attrs_to_set |= ATTR_UPPERCASE; }
             "-l" => { attrs_to_set |= ATTR_LOWERCASE; }
             "-x" => { attrs_to_set |= ATTR_EXPORT; }
+            "-n" => { attrs_to_set |= ATTR_NAMEREF; }
             "-a" => { /* array - handled below */ }
             "-A" => { /* assoc array */ }
             "-g" => { /* global */ }
             s if s.starts_with('-') => {
                 for c in s[1..].chars() {
                     match c {
+                        'p' => { print_mode = true; }
+                        'f' => { func_mode = true; }
+                        'F' => { func_mode = true; }
                         'r' => { attrs_to_set |= ATTR_READONLY; }
                         'i' => { attrs_to_set |= ATTR_INTEGER; }
                         'u' => { attrs_to_set |= ATTR_UPPERCASE; }
                         'l' => { attrs_to_set |= ATTR_LOWERCASE; }
                         'x' => { attrs_to_set |= ATTR_EXPORT; }
+                        'n' => { attrs_to_set |= ATTR_NAMEREF; }
                         _ => {}
                     }
                 }
@@ -632,8 +770,34 @@ pub fn builtin_declare(args: &[String], vars: &mut VarStore) -> i32 {
         i += 1;
     }
 
-    if print_mode {
+    let result = if func_mode {
+        // Handle function printing (declare -f or declare -pf)
+        if args[i..].is_empty() {
+            // Print all functions
+            let mut names: Vec<_> = vars.functions.keys().collect();
+            names.sort();
+            for name in names {
+                if let Some(func) = vars.functions.get(name) {
+                    println!("{} ()", name);
+                    println!("{{{}}}", func.source_code);
+                }
+            }
+            0
+        } else {
+            let mut status = 0;
+            for name in &args[i..] {
+                if let Some(func) = vars.functions.get(name) {
+                    println!("{} ()", name);
+                    println!("{{{}}}", func.source_code);
+                } else {
+                    status = 1;
+                }
+            }
+            status
+        }
+    } else if print_mode {
         // Print info about variable
+        let mut status = 0;
         for arg in &args[i..] {
             if let Some(var) = vars.get(arg) {
                 let mut flags = String::from("declare");
@@ -642,26 +806,30 @@ pub fn builtin_declare(args: &[String], vars: &mut VarStore) -> i32 {
                 if var.attrs & ATTR_UPPERCASE != 0 { flags.push_str(" -u"); }
                 if var.attrs & ATTR_LOWERCASE != 0 { flags.push_str(" -l"); }
                 if var.attrs & ATTR_EXPORT != 0 { flags.push_str(" -x"); }
+                if var.attrs & ATTR_NAMEREF != 0 { flags.push_str(" -n"); }
                 println!("{} {}=\"{}\"", flags, arg, var.value);
             } else {
                 eprintln!("zesh: declare: {}: not found", arg);
-                return 1;
+                status = 1;
             }
         }
-        return 0;
-    }
-
-    for arg in &args[i..] {
-        if let Some(eq) = arg.find('=') {
-            let k = &arg[..eq];
-            let v = arg[eq+1..].to_string();
-            vars.set_with_attrs(k, v, attrs_to_set);
-        } else {
-            let val = vars.get_str(arg).unwrap_or_default();
-            vars.set_with_attrs(arg, val, attrs_to_set);
+        status
+    } else {
+        for arg in &args[i..] {
+            if let Some(eq) = arg.find('=') {
+                let k = &arg[..eq];
+                let v = arg[eq+1..].to_string();
+                vars.set_with_attrs(k, v, attrs_to_set);
+            } else {
+                let val = vars.get_str(arg).unwrap_or_default();
+                vars.set_with_attrs(arg, val, attrs_to_set);
+            }
         }
-    }
-    0
+        0
+    };
+
+    crate::shell::executor::restore_redirections_builtin(saved);
+    result
 }
 
 pub fn builtin_read(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
@@ -1154,30 +1322,91 @@ pub fn builtin_eval(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, 
 }
 
 pub fn builtin_type(args: &[String], vars: &VarStore) -> i32 {
+    let mut path_only = false;      // -p: print path only, silent if not external
+    let mut force_path = false;     // -P: force PATH search only
+    let mut print_type = false;     // -t: print type string only
+    let mut all_locs = false;       // -a: print all locations
+    let mut no_func = false;        // -f: suppress function lookup
+    let mut names: Vec<&str> = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "-p" => { path_only = true; i += 1; }
+            "-P" => { force_path = true; path_only = true; i += 1; }
+            "-t" => { print_type = true; i += 1; }
+            "-a" => { all_locs = true; i += 1; }
+            "-f" => { no_func = true; i += 1; }
+            "--" => { names.extend(args[i+1..].iter().map(|s| s.as_str())); break; }
+            s if s.starts_with('-') => { i += 1; } // ignore unknown flags
+            s => { names.push(s); i += 1; }
+        }
+    }
+
     let mut status = 0;
-    for arg in args {
-        // Check functions
-        if vars.functions.contains_key(arg.as_str()) {
-            println!("{} is a function", arg);
-            continue;
+    for name in names {
+        let mut found = false;
+
+        // Function check (skip if -f or -P)
+        if !no_func && !force_path && vars.functions.contains_key(name) {
+            if print_type {
+                println!("function");
+            } else if !path_only {
+                println!("{} is a function", name);
+            }
+            found = true;
+            if !all_locs {
+                continue;
+            }
         }
-        // Check builtins
-        if is_builtin(arg) {
-            println!("{} is a shell builtin", arg);
-            continue;
+
+        // Builtin check (skip if -P)
+        if !force_path && is_builtin(name) {
+            if print_type {
+                println!("builtin");
+            } else if !path_only {
+                println!("{} is a shell builtin", name);
+            }
+            found = true;
+            if !all_locs {
+                continue;
+            }
         }
-        // Check keywords
-        if is_keyword(arg) {
-            println!("{} is a shell keyword", arg);
-            continue;
+
+        // Keyword check (skip if -P)
+        if !force_path && is_keyword(name) {
+            if print_type {
+                println!("keyword");
+            } else if !path_only {
+                println!("{} is a shell keyword", name);
+            }
+            found = true;
+            if !all_locs {
+                continue;
+            }
         }
-        // Check PATH
-        if let Some(path) = crate::shell::executor::find_in_path(arg, vars) {
-            println!("{} is {}", arg, path);
-            continue;
+
+        // PATH search
+        if let Some(path) = crate::shell::executor::find_in_path(name, vars) {
+            if print_type {
+                println!("file");
+            } else if path_only {
+                println!("{}", path);
+            } else {
+                println!("{} is {}", name, path);
+            }
+            found = true;
         }
-        eprintln!("zesh: type: {}: not found", arg);
-        status = 1;
+
+        // Error handling if nothing found
+        if !found {
+            if !path_only {
+                eprintln!("zesh: type: {}: not found", name);
+                status = 1;
+            } else {
+                status = 1;
+            }
+        }
     }
     status
 }
@@ -1190,7 +1419,7 @@ pub fn is_builtin(name: &str) -> bool {
         "type" | "hash" | "wait" | "jobs" | "kill" | "trap" | "umask" | "ulimit" |
         "getopts" | "mapfile" | "readarray" | "caller" | "compgen" | "complete" |
         "disown" | "shift" | "let" | "builtin" | "command" | "times" | "suspend" |
-        "fc" | "history" | "dirs" | "popd" | "pushd" | "exec" | "bg" | "fg"
+        "fc" | "history" | "dirs" | "popd" | "pushd" | "exec" | "bg" | "fg" | "shopt"
     )
 }
 
@@ -1202,6 +1431,104 @@ pub fn is_keyword(name: &str) -> bool {
         "select" | "function" | "time" | "coproc" |
         "{" | "}" | "!" | "[[" | "]]"
     )
+}
+
+pub fn builtin_shopt(args: &[String], vars: &mut VarStore) -> i32 {
+    let mut set_mode = false;
+    let mut unset_mode = false;
+    let mut query_mode = false;
+    let mut print_mode = false;
+    let mut names: Vec<&str> = Vec::new();
+
+    for arg in args {
+        match arg.as_str() {
+            "-s" => set_mode = true,
+            "-u" => unset_mode = true,
+            "-q" => query_mode = true,
+            "-p" => print_mode = true,
+            s if s.starts_with('-') => {} // ignore unknown flags
+            s => names.push(s),
+        }
+    }
+
+    if print_mode {
+        // -p: print in shopt command format
+        if names.is_empty() {
+            // Print all
+            let opts = vars.shopt_opts.clone();
+            let mut keys: Vec<&String> = opts.keys().collect();
+            keys.sort();
+            for k in keys {
+                if opts[k] {
+                    println!("shopt -s {}", k);
+                } else {
+                    println!("shopt -u {}", k);
+                }
+            }
+        } else {
+            // Print specific names
+            for name in &names {
+                match vars.shopt_opts.get(*name) {
+                    Some(true) => println!("shopt -s {}", name),
+                    Some(false) => println!("shopt -u {}", name),
+                    None => {
+                        eprintln!("zesh: shopt: {}: invalid shell option name", name);
+                        return 1;
+                    }
+                }
+            }
+        }
+        return 0;
+    }
+
+    if names.is_empty() {
+        // No names and no -p: print all in on/off format
+        let opts = vars.shopt_opts.clone();
+        let mut keys: Vec<&String> = opts.keys().collect();
+        keys.sort();
+        for k in keys {
+            if !query_mode {
+                println!("{}\t{}", k, if opts[k] { "on" } else { "off" });
+            }
+        }
+        return 0;
+    }
+
+    // Handle -s, -u, or plain query
+    let mut status = 0;
+    for name in &names {
+        if set_mode {
+            if vars.shopt_opts.contains_key(*name) {
+                vars.shopt_opts.insert(name.to_string(), true);
+            } else {
+                eprintln!("zesh: shopt: {}: invalid shell option name", name);
+                status = 1;
+            }
+        } else if unset_mode {
+            if vars.shopt_opts.contains_key(*name) {
+                vars.shopt_opts.insert(name.to_string(), false);
+            } else {
+                eprintln!("zesh: shopt: {}: invalid shell option name", name);
+                status = 1;
+            }
+        } else {
+            // Plain query or print single option
+            match vars.shopt_opts.get(*name) {
+                Some(true) => {
+                    if !query_mode { println!("{}\ton", name); }
+                }
+                Some(false) => {
+                    if !query_mode { println!("{}\toff", name); }
+                    status = 1;
+                }
+                None => {
+                    eprintln!("zesh: shopt: {}: invalid shell option name", name);
+                    status = 1;
+                }
+            }
+        }
+    }
+    status
 }
 
 pub fn builtin_hash(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, vars: &mut VarStore) -> i32 {
@@ -2083,7 +2410,7 @@ pub fn builtin_mapfile(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContex
 
     // Fill array
     for (i, s) in lines.iter().enumerate() {
-        vars.set_array_elem(&arr_name, start_idx + i, s.clone());
+        vars.set_array_elem(&arr_name, &(start_idx + i).to_string(), s.clone());
     }
 
     crate::shell::executor::restore_redirections_builtin(saved);

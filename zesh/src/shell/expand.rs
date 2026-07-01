@@ -25,6 +25,35 @@ pub fn eval_arith_simple(expr: &str) -> Result<i64, String> {
     result
 }
 
+// Check if a string looks like an arithmetic expression
+// (contains operators, digits, etc.) vs a plain identifier
+fn looks_like_arithmetic(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() { return false; }
+
+    // If it contains arithmetic operators, it's arithmetic
+    if s.contains('+') || s.contains('-') || s.contains('*') || s.contains('/')
+        || s.contains('%') || s.contains('(') || s.contains(')') || s.contains('&')
+        || s.contains('|') || s.contains('^') || s.contains('~') || s.contains('<')
+        || s.contains('>') || s.contains('=') || s.contains('!') || s.contains('?')
+        || s.contains(':') {
+        return true;
+    }
+
+    // If it's purely digits, it's arithmetic
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+
+    // If it starts with a digit, it might be arithmetic (e.g., "123abc")
+    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        return true;
+    }
+
+    // Otherwise it looks like a string/identifier
+    false
+}
+
 fn eval_arith_expr(expr: &str) -> Result<i64, String> {
     ARITH_DEPTH.with(|d| {
         *d.borrow_mut() = 0;
@@ -781,18 +810,37 @@ pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore
                 } else {
                     (false, rest)
                 };
+
+                // Detect anchor prefix on the pattern
+                let (anchor, rest) = if rest.starts_with('%') {
+                    (PatternAnchor::End, &rest[1..])
+                } else if rest.starts_with('#') {
+                    (PatternAnchor::Start, &rest[1..])
+                } else {
+                    (PatternAnchor::None, rest)
+                };
+
                 let parts: Vec<&str> = rest.splitn(2, '/').collect();
                 let pat = parts[0];
                 let repl = if parts.len() > 1 { parts[1] } else { "" };
 
                 if let Some(arr) = vars.get_array(arr_name) {
-                    let mut keys: Vec<usize> = arr.keys().copied().collect();
-                    keys.sort();
+                    let mut keys: Vec<String> = arr.keys().cloned().collect();
+                    keys.sort_by(|a, b| {
+                        let a_num = a.parse::<i64>();
+                        let b_num = b.parse::<i64>();
+                        match (a_num, b_num) {
+                            (Ok(an), Ok(bn)) => an.cmp(&bn),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => a.cmp(b),
+                        }
+                    });
                     // Expand variables in the replacement string
                     let expanded_repl = expand_string(repl, vars, script_file);
                     let mut result = Vec::new();
                     for k in keys {
-                        result.push(replace_pattern(&arr[&k], pat, &expanded_repl, global));
+                        result.push(replace_pattern(&arr[&k], pat, &expanded_repl, global, anchor));
                     }
                     return result;
                 }
@@ -804,8 +852,17 @@ pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore
         if inner.ends_with("[@]") && !inner.starts_with('#') {
             let arr_name = &inner[..inner.len()-3];
             if let Some(arr) = vars.get_array(arr_name) {
-                let mut keys: Vec<usize> = arr.keys().copied().collect();
-                keys.sort();
+                let mut keys: Vec<String> = arr.keys().cloned().collect();
+                keys.sort_by(|a, b| {
+                    let a_num = a.parse::<i64>();
+                    let b_num = b.parse::<i64>();
+                    match (a_num, b_num) {
+                        (Ok(an), Ok(bn)) => an.cmp(&bn),
+                        (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                        (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                        (Err(_), Err(_)) => a.cmp(b),
+                    }
+                });
                 let mut result = Vec::new();
                 for k in keys {
                     result.push(arr[&k].clone());
@@ -1439,26 +1496,144 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         }
 
         // Indirect reference: ${!VAR} where VAR contains a variable name or numeric index
+        // Skip if rest has a transform (@a, @U, etc.) — let the @transform handler deal with it
         if !rest.is_empty() && !rest.contains('[') && !rest.contains(']') {
-            // Get the value of the indirection variable
-            let indirect_val = get_var_value(rest, vars, script_file);
+            // Check if there's a transform: @ followed by a single letter at the end
+            if let Some(at_pos) = rest.rfind('@') {
+                let after_at = &rest[at_pos+1..];
+                if after_at.len() == 1 && matches!(after_at, "U" | "L" | "l" | "Q" | "q" | "E" | "a" | "A" | "i" | "r" | "x") {
+                    // This is ${!var@transform}, skip indirect handling here
+                    // The @transform handler below will process it
+                    // Fall through to normal parameter handling
+                    // Actually, we need to NOT return here, just skip this block
+                } else {
+                    // Not a transform, check if rest contains operators (:-=+?#%/:^,)
+                    let has_operator = rest.contains('-') || rest.contains('=') || rest.contains('+') ||
+                                      rest.contains('?') || rest.contains('#') || rest.contains('%') ||
+                                      rest.contains('/') || rest.contains(':') || rest.contains('^') ||
+                                      rest.contains(',');
 
-            // Try to interpret it as a numeric positional parameter index
-            if let Ok(idx) = indirect_val.parse::<usize>() {
-                if idx > 0 {
-                    // It's a numeric index, return the positional parameter at that index
-                    if let Some(val) = vars.get_str(&idx.to_string()) {
+                    if !has_operator {
+                        // No operator: simple indirect expansion
+                        let indirect_val = get_var_value(rest, vars, script_file);
+
+                        // Try to interpret it as a numeric positional parameter index
+                        if let Ok(idx) = indirect_val.parse::<usize>() {
+                            if idx > 0 {
+                                // It's a numeric index, return the positional parameter at that index
+                                if let Some(val) = vars.get_str(&idx.to_string()) {
+                                    return val;
+                                }
+                                return String::new();
+                            }
+                        }
+
+                        // Otherwise, treat it as a variable name
+                        if let Some(val) = vars.get_str(&indirect_val) {
+                            return val;
+                        }
+                        return String::new();
+                    } else {
+                        // Has operator: resolve indirect and reconstruct
+                        // Find where the variable name ends (before first operator char)
+                        let name_end = rest.find(|c: char| !c.is_alphanumeric() && c != '_')
+                            .unwrap_or(rest.len());
+                        let var_name_in_rest = &rest[..name_end];
+                        let operator_part = &rest[name_end..];
+
+                        if !operator_part.is_empty() {
+                            let resolved_var_name = get_var_value(var_name_in_rest, vars, script_file);
+                            // Handle numeric index → positional param name
+                            let real_var_name = if let Ok(idx) = resolved_var_name.parse::<usize>() {
+                                idx.to_string()
+                            } else {
+                                resolved_var_name
+                            };
+                            // Reconstruct and recurse
+                            let new_content = format!("{}{}", real_var_name, operator_part);
+                            return expand_param(&new_content, vars, script_file);
+                        } else {
+                            // No operator part found, do normal indirect expansion
+                            let indirect_val = get_var_value(rest, vars, script_file);
+                            if let Ok(idx) = indirect_val.parse::<usize>() {
+                                if idx > 0 {
+                                    if let Some(val) = vars.get_str(&idx.to_string()) {
+                                        return val;
+                                    }
+                                    return String::new();
+                                }
+                            }
+                            if let Some(val) = vars.get_str(&indirect_val) {
+                                return val;
+                            }
+                            return String::new();
+                        }
+                    }
+                }
+            } else {
+                // No @, check if rest contains operators
+                let has_operator = rest.contains('-') || rest.contains('=') || rest.contains('+') ||
+                                  rest.contains('?') || rest.contains('#') || rest.contains('%') ||
+                                  rest.contains('/') || rest.contains(':') || rest.contains('^') ||
+                                  rest.contains(',');
+
+                if !has_operator {
+                    // No operator: simple indirect expansion
+                    let indirect_val = get_var_value(rest, vars, script_file);
+
+                    // Try to interpret it as a numeric positional parameter index
+                    if let Ok(idx) = indirect_val.parse::<usize>() {
+                        if idx > 0 {
+                            // It's a numeric index, return the positional parameter at that index
+                            if let Some(val) = vars.get_str(&idx.to_string()) {
+                                return val;
+                            }
+                            return String::new();
+                        }
+                    }
+
+                    // Otherwise, treat it as a variable name
+                    if let Some(val) = vars.get_str(&indirect_val) {
                         return val;
                     }
                     return String::new();
+                } else {
+                    // Has operator: resolve indirect and reconstruct
+                    // Find where the variable name ends (before first operator char)
+                    let name_end = rest.find(|c: char| !c.is_alphanumeric() && c != '_')
+                        .unwrap_or(rest.len());
+                    let var_name_in_rest = &rest[..name_end];
+                    let operator_part = &rest[name_end..];
+
+                    if !operator_part.is_empty() {
+                        let resolved_var_name = get_var_value(var_name_in_rest, vars, script_file);
+                        // Handle numeric index → positional param name
+                        let real_var_name = if let Ok(idx) = resolved_var_name.parse::<usize>() {
+                            idx.to_string()
+                        } else {
+                            resolved_var_name
+                        };
+                        // Reconstruct and recurse
+                        let new_content = format!("{}{}", real_var_name, operator_part);
+                        return expand_param(&new_content, vars, script_file);
+                    } else {
+                        // No operator part found, do normal indirect expansion
+                        let indirect_val = get_var_value(rest, vars, script_file);
+                        if let Ok(idx) = indirect_val.parse::<usize>() {
+                            if idx > 0 {
+                                if let Some(val) = vars.get_str(&idx.to_string()) {
+                                    return val;
+                                }
+                                return String::new();
+                            }
+                        }
+                        if let Some(val) = vars.get_str(&indirect_val) {
+                            return val;
+                        }
+                        return String::new();
+                    }
                 }
             }
-
-            // Otherwise, treat it as a variable name
-            if let Some(val) = vars.get_str(&indirect_val) {
-                return val;
-            }
-            return String::new();
         }
     }
 
@@ -1484,6 +1659,23 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         // Skip if @ itself is the variable name (e.g. ${@+yes} - here @ is the special param)
         if !before.ends_with('[') && !before.ends_with('$') && !before.is_empty() {
             let transform = &content[at_pos+1..];
+
+            // Handle attribute query transforms (@a, etc.)
+            if matches!(transform, "a" | "A" | "i" | "r" | "x" | "l" | "u") {
+                // Resolve the variable name (handle indirect references like !varname)
+                let target_name = if before.starts_with('!') {
+                    let indirect_var = &before[1..];
+                    get_var_value(indirect_var, vars, script_file)
+                } else {
+                    before.to_string()
+                };
+
+                // Get attributes of the target variable
+                let attrs = get_var_attributes(&target_name, vars);
+                return attrs;
+            }
+
+            // Handle value transformation transforms (U, L, Q, E)
             let val = get_var_value(before, vars, script_file);
             return match transform {
                 "U" => val.to_uppercase(),
@@ -1509,8 +1701,17 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
             if is_all {
                 let arr_name = &name[..name.len()-3];
                 if let Some(arr) = vars.get_array(arr_name) {
-                    let mut keys: Vec<usize> = arr.keys().copied().collect();
-                    keys.sort();
+                    let mut keys: Vec<String> = arr.keys().cloned().collect();
+                    keys.sort_by(|a, b| {
+                        let a_num = a.parse::<i64>();
+                        let b_num = b.parse::<i64>();
+                        match (a_num, b_num) {
+                            (Ok(an), Ok(bn)) => an.cmp(&bn),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => a.cmp(b),
+                        }
+                    });
                     let elems: Vec<&str> = keys.iter().map(|k| arr[k].as_str()).collect();
                     let elen = elems.len() as i64;
                     let start = if offset < 0 {
@@ -1586,6 +1787,7 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
 
     // Pattern removal ${VAR#pat}, ${VAR##pat}, ${VAR%pat}, ${VAR%%pat}
     // ${VAR/pat/repl}, ${VAR//pat/repl}
+    // Case modification ${VAR^^}, ${VAR^}, ${VAR,,}, ${VAR,}
     // Process this BEFORE array indexing to handle ${arr[@]/pat/repl}
     for (i, c) in content.char_indices() {
         match c {
@@ -1619,6 +1821,16 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
                 } else {
                     (false, rest)
                 };
+
+                // Detect anchor prefix on the pattern
+                let (anchor, rest) = if rest.starts_with('%') {
+                    (PatternAnchor::End, &rest[1..])
+                } else if rest.starts_with('#') {
+                    (PatternAnchor::Start, &rest[1..])
+                } else {
+                    (PatternAnchor::None, rest)
+                };
+
                 let parts: Vec<&str> = rest.splitn(2, '/').collect();
                 let pat = parts[0];
                 let repl = if parts.len() > 1 { parts[1] } else { "" };
@@ -1627,12 +1839,21 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
                 if (name.ends_with("[@]") || name.ends_with("[*]")) && name.len() > 3 {
                     let arr_name = &name[..name.len()-3];
                     if let Some(arr) = vars.get_array(arr_name) {
-                        let mut keys: Vec<usize> = arr.keys().copied().collect();
-                        keys.sort();
+                        let mut keys: Vec<String> = arr.keys().cloned().collect();
+                        keys.sort_by(|a, b| {
+                            let a_num = a.parse::<i64>();
+                            let b_num = b.parse::<i64>();
+                            match (a_num, b_num) {
+                                (Ok(an), Ok(bn)) => an.cmp(&bn),
+                                (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                                (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                                (Err(_), Err(_)) => a.cmp(b),
+                            }
+                        });
                         // Expand variables in the replacement string
                         let expanded_repl = expand_string(repl, vars, script_file);
                         let replaced: Vec<String> = keys.iter()
-                            .map(|k| replace_pattern(&arr[k], pat, &expanded_repl, global))
+                            .map(|k| replace_pattern(&arr[k], pat, &expanded_repl, global, anchor))
                             .collect();
                         return replaced.join(" ");
                     }
@@ -1643,7 +1864,39 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
                 let val = get_var_value(name, vars, script_file);
                 // Expand variables in the replacement string
                 let expanded_repl = expand_string(repl, vars, script_file);
-                return replace_pattern(&val, pat, &expanded_repl, global);
+                return replace_pattern(&val, pat, &expanded_repl, global, anchor);
+            }
+            '^' if i > 0 => {
+                let name = &content[..i];
+                let rest = &content[i+1..];
+                let val = get_var_value(name, vars, script_file);
+                if rest.starts_with('^') {
+                    // ^^ — uppercase all characters
+                    return val.to_uppercase();
+                } else {
+                    // ^ — uppercase first character only
+                    let mut chars = val.chars();
+                    return match chars.next() {
+                        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    };
+                }
+            }
+            ',' if i > 0 => {
+                let name = &content[..i];
+                let rest = &content[i+1..];
+                let val = get_var_value(name, vars, script_file);
+                if rest.starts_with(',') {
+                    // ,, — lowercase all characters
+                    return val.to_lowercase();
+                } else {
+                    // , — lowercase first character only
+                    let mut chars = val.chars();
+                    return match chars.next() {
+                        Some(c) => c.to_lowercase().collect::<String>() + chars.as_str(),
+                        None => String::new(),
+                    };
+                }
             }
             _ => {}
         }
@@ -1656,21 +1909,42 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
         if let Some(end) = rest.find(']') {
             let idx_str = &rest[..end];
             if idx_str == "@" || idx_str == "*" {
-                // Expand all elements
+                // Expand all elements, sorted numerically if keys are numeric
                 if let Some(arr) = vars.get_array(name) {
-                    let mut keys: Vec<usize> = arr.keys().copied().collect();
-                    keys.sort();
+                    let mut keys: Vec<String> = arr.keys().cloned().collect();
+                    // Sort: numeric keys first (in numeric order), then others
+                    keys.sort_by(|a, b| {
+                        let a_num = a.parse::<i64>();
+                        let b_num = b.parse::<i64>();
+                        match (a_num, b_num) {
+                            (Ok(an), Ok(bn)) => an.cmp(&bn),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => a.cmp(b),
+                        }
+                    });
                     return keys.iter().map(|k| arr[k].clone()).collect::<Vec<_>>().join(" ");
                 }
                 return String::new();
             }
-            // Arithmetic index
-            let idx = match eval_arith_expr_with_vars(idx_str, vars) {
-                Ok(n) => n as usize,
-                Err(_) => 0,
+            // Expand the index expression (handles variables, quotes, command substitution, etc.)
+            let expanded_idx = expand_string_inner(idx_str, vars, script_file);
+            // Try to evaluate as arithmetic index first
+            // If it looks like an arithmetic expression (contains operators, numbers, etc.)
+            // try to evaluate it. Otherwise, use as string key directly.
+            let idx_key = if looks_like_arithmetic(&expanded_idx) {
+                if let Ok(n) = eval_arith_expr_with_vars(&expanded_idx, vars) {
+                    n.to_string()
+                } else {
+                    // Evaluation failed, use as string
+                    expanded_idx
+                }
+            } else {
+                // Doesn't look like arithmetic, use as string key
+                expanded_idx
             };
             if let Some(arr) = vars.get_array(name) {
-                return arr.get(&idx).cloned().unwrap_or_default();
+                return arr.get(&idx_key).cloned().unwrap_or_default();
             }
             return String::new();
         }
@@ -1833,6 +2107,39 @@ fn get_var_value(name: &str, vars: &crate::shell::vars::VarStore, script_file: &
     expand_special_var(name, vars, script_file)
 }
 
+fn get_var_attributes(name: &str, vars: &crate::shell::vars::VarStore) -> String {
+    // Returns the attributes of a variable as a string where:
+    // 'a' = indexed array, 'A' = associative array, 'i' = integer, 'r' = readonly,
+    // 'x' = exported, 'l' = lowercase, 'u' = uppercase
+    let mut attrs = String::new();
+
+    // Check if it's an indexed array
+    if vars.get_array(name).is_some() {
+        attrs.push('a');
+    }
+
+    // Check variable attributes from the Var struct
+    if let Some(var) = vars.get(name) {
+        if var.attrs & crate::shell::vars::ATTR_READONLY != 0 {
+            attrs.push('r');
+        }
+        if var.attrs & crate::shell::vars::ATTR_INTEGER != 0 {
+            attrs.push('i');
+        }
+        if var.attrs & crate::shell::vars::ATTR_EXPORT != 0 {
+            attrs.push('x');
+        }
+        if var.attrs & crate::shell::vars::ATTR_UPPERCASE != 0 {
+            attrs.push('u');
+        }
+        if var.attrs & crate::shell::vars::ATTR_LOWERCASE != 0 {
+            attrs.push('l');
+        }
+    }
+
+    attrs
+}
+
 fn is_var_unset(name: &str, vars: &crate::shell::vars::VarStore) -> bool {
     vars.get(name).is_none()
 }
@@ -1881,54 +2188,89 @@ fn strip_suffix_pattern(val: &str, pat: &str, greedy: bool) -> String {
     val.to_string()
 }
 
-fn replace_pattern(val: &str, pat: &str, repl: &str, global: bool) -> String {
-    if global {
-        // Replace all non-overlapping occurrences
-        let mut result = String::new();
-        let mut i = 0;
-        let chars: Vec<char> = val.chars().collect();
-        while i <= chars.len() {
-            let mut matched = false;
-            for end in (i..=chars.len()).rev() {
-                let slice: String = chars[i..end].iter().collect();
+#[derive(Clone, Copy, PartialEq)]
+enum PatternAnchor {
+    None,
+    Start,  // '#' — must match at beginning
+    End,    // '%' — must match at end
+}
+
+fn replace_pattern(val: &str, pat: &str, repl: &str, global: bool, anchor: PatternAnchor) -> String {
+    match anchor {
+        PatternAnchor::Start => {
+            // Match only at the very beginning
+            let chars: Vec<char> = val.chars().collect();
+            for end in (0..=chars.len()).rev() {
+                let slice: String = chars[..end].iter().collect();
                 if glob_match(pat, &slice) {
-                    result.push_str(repl);
-                    if end == i {
-                        // Empty-pattern match: consume the next char too so we
-                        // don't loop forever (mirrors bash "${v///R}" behaviour).
+                    let after: String = chars[end..].iter().collect();
+                    return format!("{}{}", repl, after);
+                }
+            }
+            val.to_string()
+        }
+        PatternAnchor::End => {
+            // Match only at the very end
+            let chars: Vec<char> = val.chars().collect();
+            for start in 0..=chars.len() {
+                let slice: String = chars[start..].iter().collect();
+                if glob_match(pat, &slice) {
+                    let before: String = chars[..start].iter().collect();
+                    return format!("{}{}", before, repl);
+                }
+            }
+            val.to_string()
+        }
+        PatternAnchor::None => {
+            if global {
+                // Replace all non-overlapping occurrences
+                let mut result = String::new();
+                let mut i = 0;
+                let chars: Vec<char> = val.chars().collect();
+                while i <= chars.len() {
+                    let mut matched = false;
+                    for end in (i..=chars.len()).rev() {
+                        let slice: String = chars[i..end].iter().collect();
+                        if glob_match(pat, &slice) {
+                            result.push_str(repl);
+                            if end == i {
+                                // Empty-pattern match: consume the next char too so we
+                                // don't loop forever (mirrors bash "${v///R}" behaviour).
+                                if i < chars.len() {
+                                    result.push(chars[i]);
+                                }
+                                i += 1;
+                            } else {
+                                i = end;
+                            }
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if !matched {
                         if i < chars.len() {
                             result.push(chars[i]);
                         }
                         i += 1;
-                    } else {
-                        i = end;
                     }
-                    matched = true;
-                    break;
                 }
-            }
-            if !matched {
-                if i < chars.len() {
-                    result.push(chars[i]);
+                result
+            } else {
+                // Replace first occurrence
+                let chars: Vec<char> = val.chars().collect();
+                for start in 0..=chars.len() {
+                    for end in (start..=chars.len()).rev() {
+                        let slice: String = chars[start..end].iter().collect();
+                        if glob_match(pat, &slice) {
+                            let before: String = chars[..start].iter().collect();
+                            let after: String = chars[end..].iter().collect();
+                            return format!("{}{}{}", before, repl, after);
+                        }
+                    }
                 }
-                i += 1;
-            }
-        }
-        result
-    } else {
-        // Replace first occurrence
-        let chars: Vec<char> = val.chars().collect();
-        for start in 0..=chars.len() {
-            for end in (start..=chars.len()).rev() {
-                let slice: String = chars[start..end].iter().collect();
-                if glob_match(pat, &slice) {
-                    let before: String = chars[..start].iter().collect();
-                    let after: String = chars[end..].iter().collect();
-                    return format!("{}{}{}", before, repl, after);
-                }
+                val.to_string()
             }
         }
-        val.to_string()
     }
 }
 
@@ -2035,7 +2377,7 @@ fn glob_match_chars(pat: &[char], pi: usize, s: &[char], si: usize) -> bool {
         '[' => {
             // Character class - but only if it has a closing ]
             let mut pi2 = pi + 1;
-            let negate = pi2 < pat.len() && pat[pi2] == '!';
+            let negate = pi2 < pat.len() && (pat[pi2] == '!' || pat[pi2] == '^');
             if negate { pi2 += 1; }
             let mut has_closing_bracket = false;
             let mut first = true;
@@ -2611,7 +2953,7 @@ pub fn expand_token(tok: &crate::shell::types::Token, vars: &crate::shell::vars:
     }
 }
 
-fn create_process_substitution(cmd: &str, vars: &crate::shell::vars::VarStore, script_file: &str, is_input: bool) -> String {
+pub fn create_process_substitution(cmd: &str, vars: &crate::shell::vars::VarStore, script_file: &str, is_input: bool) -> String {
     let mut pipe_fds = [0i32; 2];
     // SAFETY: pipe() is a valid syscall
     if unsafe { libc::pipe(pipe_fds.as_mut_ptr()) } != 0 {

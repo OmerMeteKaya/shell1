@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use crate::shell::expand::{
     eval_arith_expr_with_vars, expand_heredoc_body, expand_string, expand_token,
-    take_param_assigns,
+    expand_word_no_glob, take_param_assigns,
 };
 use crate::shell::types::*;
 use crate::shell::vars::{VarStore, ATTR_EXPORT, ATTR_LOCAL};
@@ -68,6 +68,35 @@ impl ExecContext {
         ctx.is_subshell = true;
         ctx
     }
+}
+
+// Check if a string looks like an arithmetic expression
+// (contains operators, digits, etc.) vs a plain identifier
+fn looks_like_arithmetic_expr(s: &str) -> bool {
+    let s = s.trim();
+    if s.is_empty() { return false; }
+
+    // If it contains arithmetic operators, it's arithmetic
+    if s.contains('+') || s.contains('-') || s.contains('*') || s.contains('/')
+        || s.contains('%') || s.contains('(') || s.contains(')') || s.contains('&')
+        || s.contains('|') || s.contains('^') || s.contains('~') || s.contains('<')
+        || s.contains('>') || s.contains('=') || s.contains('!') || s.contains('?')
+        || s.contains(':') {
+        return true;
+    }
+
+    // If it's purely digits, it's arithmetic
+    if s.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+
+    // If it starts with a digit, it might be arithmetic (e.g., "123abc")
+    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+        return true;
+    }
+
+    // Otherwise it looks like a string/identifier
+    false
 }
 
 const MAX_CALL_DEPTH: usize = 2000;
@@ -245,6 +274,7 @@ fn execute_compound(
                     body: body.clone(),
                     defined_at_line: ctx.lineno,
                     source_file: ctx.script_file.clone(),
+                    source_code: String::new(),
                 },
             );
             0
@@ -436,9 +466,18 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
         return true;
     }
 
-    // Regular file
+    // Process substitution or regular file
     if let Some(file) = &redir.file {
-        let expanded = expand_string(file, vars, &ctx.script_file);
+        let path_to_open = if redir.is_procsubst {
+            // Extract command from <(cmd) or >(cmd)
+            let start_delim_len = if file.starts_with("<(") || file.starts_with(">(") { 2 } else { 0 };
+            let end_pos = if file.ends_with(')') { file.len() - 1 } else { file.len() };
+            let cmd = &file[start_delim_len..end_pos];
+            crate::shell::expand::create_process_substitution(cmd, vars, &ctx.script_file, redir.is_input)
+        } else {
+            expand_string(file, vars, &ctx.script_file)
+        };
+
         let flags = if redir.is_input {
             libc::O_RDONLY
         } else if redir.append {
@@ -447,14 +486,14 @@ fn apply_one_redir_raw(redir: &FdRedir, ctx: &mut ExecContext, vars: &mut VarSto
             libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC
         };
 
-        let cstr = match std::ffi::CString::new(expanded.as_str()) {
+        let cstr = match std::ffi::CString::new(path_to_open.as_str()) {
             Ok(c) => c,
             Err(_) => return false,
         };
         // SAFETY: open with valid C string path and flags
         let fd = unsafe { libc::open(cstr.as_ptr(), flags, 0o666) };
         if fd < 0 {
-            eprintln!("zesh: {}: {}", expanded, std::io::Error::last_os_error());
+            eprintln!("zesh: {}: {}", path_to_open, std::io::Error::last_os_error());
             return false;
         }
         // SAFETY: dup2 with valid fds; only close temp fd if it differs from src_fd
@@ -485,6 +524,25 @@ fn restore_redirections(saved: Vec<SavedFd>) {
             }
         }
     }
+}
+
+// Check if a string has the shape NAME=value or NAME+=value (where NAME is a valid identifier or array element)
+fn is_assignment_shaped(s: &str) -> bool {
+    let Some(eq) = s.find('=') else { return false; };
+    let name = if eq > 0 && s.as_bytes()[eq - 1] == b'+' { &s[..eq - 1] } else { &s[..eq] };
+    if name.is_empty() { return false; }
+
+    // NAME can be an identifier or array element like arr[index]
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !(first.is_alphabetic() || first == '_') { return false; }
+
+    for c in chars {
+        if !(c.is_alphanumeric() || c == '_' || c == '[' || c == ']') {
+            return false;
+        }
+    }
+    true
 }
 
 fn execute_simple(
@@ -543,6 +601,40 @@ fn execute_simple(
             restore_redirections(early_saved);
             return 1;
         }
+
+        // Check for indexed assignment: NAME[INDEX]
+        if let Some(bracket_pos) = k.find('[') {
+            if k.ends_with(']') {
+                let arr_name = &k[..bracket_pos];
+                let index_expr = &k[bracket_pos+1..k.len()-1];
+                // Expand the index expression (it may contain $vars, arithmetic, etc.)
+                let expanded_index = expand_string(index_expr, vars, &ctx.script_file);
+                // For numeric indices in the expanded form, use the numeric value
+                // For string indices, use the expanded string directly
+                let index_str = if looks_like_arithmetic_expr(&expanded_index) {
+                    if let Ok(n) = crate::shell::expand::eval_arith_expr_with_vars(&expanded_index, vars) {
+                        n.to_string()
+                    } else {
+                        expanded_index
+                    }
+                } else {
+                    expanded_index
+                };
+                let final_v = if *is_append {
+                    let current = vars.get_array(arr_name)
+                        .and_then(|arr| arr.get(&index_str))
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    format!("{}{}", current, expanded_v)
+                } else {
+                    expanded_v
+                };
+                vars.set_array_elem(arr_name, &index_str, final_v);
+                continue;
+            }
+        }
+
+        // Scalar assignment
         let final_v = if *is_append {
             let current = vars.get_str(k).unwrap_or_default();
             format!("{}{}", current, expanded_v)
@@ -560,23 +652,47 @@ fn execute_simple(
         cmd.words[0].value == "["
     );
 
+    // Check if this is a declare-like command (local, declare, typeset, export, readonly)
+    // where we need to prevent word-splitting on assignment RHS values
+    let cmd_name = cmd.words.first().map(|t| t.value.as_str()).unwrap_or("");
+    let is_declare_like = matches!(cmd_name, "local" | "declare" | "typeset" | "export" | "readonly");
+
     let mut argv: Vec<String> = Vec::new();
-    for tok in &cmd.words {
-        let expanded = if is_test_command {
-            // For test commands, skip pathname globbing
-            crate::shell::expand::expand_word_no_glob(&tok.value, tok.quoted, vars, &ctx.script_file)
+    for (idx, tok) in cmd.words.iter().enumerate() {
+        // For declare-like commands, handle assignment-shaped arguments specially
+        // (idx > 0 skips the command name itself)
+        if is_declare_like && idx > 0 && is_assignment_shaped(&tok.value) {
+            // Expand the RHS without word-splitting
+            let eq = tok.value.find('=').unwrap();
+            let is_append = eq > 0 && tok.value.as_bytes()[eq - 1] == b'+';
+            let name_end = if is_append { eq - 1 } else { eq };
+            let name_part = &tok.value[..name_end];  // e.g., "arr[0]" or "x"
+            let rhs = &tok.value[eq + 1..];
+
+            // Expand RHS with quoted=true to suppress word-splitting and globbing
+            let expanded_rhs = expand_word_no_glob(rhs, true, vars, &ctx.script_file);
+            // Join the parts (should normally be a single element due to quoted=true)
+            let joined_rhs = expanded_rhs.join("");
+            let sep = if is_append { "+=" } else { "=" };
+            argv.push(format!("{}{}{}", name_part, sep, joined_rhs));
         } else {
-            expand_token(tok, vars, &ctx.script_file)
-        };
-        // Apply any := assignments from expansion
-        for (an, av) in crate::shell::expand::take_param_assigns() {
-            vars.set(&an, av);
+            // Normal expansion for non-assignment words or non-declare commands
+            let expanded = if is_test_command {
+                // For test commands, skip pathname globbing
+                expand_word_no_glob(&tok.value, tok.quoted, vars, &ctx.script_file)
+            } else {
+                expand_token(tok, vars, &ctx.script_file)
+            };
+            // Apply any := assignments from expansion
+            for (an, av) in crate::shell::expand::take_param_assigns() {
+                vars.set(&an, av);
+            }
+            if crate::shell::expand::take_param_error() {
+                restore_redirections(early_saved);
+                return 1;
+            }
+            argv.extend(expanded);
         }
-        if crate::shell::expand::take_param_error() {
-            restore_redirections(early_saved);
-            return 1;
-        }
-        argv.extend(expanded);
     }
 
     // Restore early redirections — builtins and exec re-apply their own,
@@ -606,7 +722,7 @@ fn execute_simple(
             // which should expand to multiple elements in an array context
             let expanded_parts = crate::shell::expand::expand_word(elem, true, vars, &ctx.script_file);
             for part in expanded_parts {
-                vars.set_array_elem(arr_name, current_idx, part);
+                vars.set_array_elem(arr_name, &current_idx.to_string(), part);
                 current_idx += 1;
             }
         }
@@ -1541,8 +1657,8 @@ fn execute_coproc(name: &str, body: &[CmdNode], ctx: &mut ExecContext, vars: &mu
 
     // Set CPCAT[0]=pipe2[0] (read), CPCAT[1]=pipe1[1] (write)
     let arr = vars.get_array_mut(name);
-    arr.insert(0, pipe2[0].to_string());
-    arr.insert(1, pipe1[1].to_string());
+    arr.insert("0".to_string(), pipe2[0].to_string());
+    arr.insert("1".to_string(), pipe1[1].to_string());
 
     vars.set_raw("!", pid.to_string(), 0);
     crate::shell::jobs::jobs().add(pid, format!("coproc {}", name));
@@ -1903,7 +2019,7 @@ fn try_builtin(
         "export" => Some(builtin_export(args, vars)),
         "readonly" => Some(builtin_readonly(args, vars)),
         "local" => Some(builtin_local(args, vars)),
-        "declare" | "typeset" => Some(builtin_declare(args, vars)),
+        "declare" | "typeset" => Some(builtin_declare(args, redirs, ctx, vars)),
         "read" => Some(builtin_read(args, redirs, ctx, vars)),
         "source" | "." => Some(builtin_source(args, ctx, vars)),
         "true" | ":" => Some(0),
@@ -1935,7 +2051,10 @@ fn try_builtin(
         "complete" => Some(0),
         "disown" => Some(builtin_disown(args, vars)),
         "shift" => Some(builtin_shift(args, ctx, vars)),
-        "printf" => Some(builtin_printf(args, redirs, ctx, vars)),
+        "shopt" => {
+            let status = builtin_shopt(args, vars);
+            Some(with_redirections(redirs, ctx, vars, |_, _| status))
+        }
         "times" => Some(0),
         "suspend" => Some(0),
         "fc" => Some(0),

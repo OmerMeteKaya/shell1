@@ -873,6 +873,9 @@ impl Parser {
                                         }
                                         break;
                                     }
+                                    TokKind::Newline => {
+                                        self.advance(); // skip newline, don't add as element
+                                    }
                                     _ => {
                                         let elem = self.consume();
                                         elems.push(elem.value);
@@ -906,6 +909,9 @@ impl Parser {
                                                     self.advance();
                                                 }
                                                 break;
+                                            }
+                                            TokKind::Newline => {
+                                                self.advance(); // skip newline, don't add as element
                                             }
                                             _ => {
                                                 let elem = self.consume();
@@ -968,6 +974,7 @@ impl Parser {
             TokKind::RedirIn => {
                 self.advance();
                 let file = self.consume().value;
+                let is_procsubst = file.starts_with("<(");
                 Some(FdRedir {
                     src_fd: 0,
                     dst_fd: -2,
@@ -976,13 +983,14 @@ impl Parser {
                     is_input: true,
                     heredoc_content: None,
                     is_herestr: false,
-                    is_procsubst: false,
+                    is_procsubst,
                     dst_fd_word: None,
                 })
             }
             TokKind::RedirOut => {
                 self.advance();
                 let file = self.consume().value;
+                let is_procsubst = file.starts_with(">(");
                 Some(FdRedir {
                     src_fd: 1,
                     dst_fd: -2,
@@ -991,13 +999,14 @@ impl Parser {
                     is_input: false,
                     heredoc_content: None,
                     is_herestr: false,
-                    is_procsubst: false,
+                    is_procsubst,
                     dst_fd_word: None,
                 })
             }
             TokKind::RedirAppend => {
                 self.advance();
                 let file = self.consume().value;
+                let is_procsubst = file.starts_with(">(");
                 Some(FdRedir {
                     src_fd: 1,
                     dst_fd: -2,
@@ -1006,7 +1015,7 @@ impl Parser {
                     is_input: false,
                     heredoc_content: None,
                     is_herestr: false,
-                    is_procsubst: false,
+                    is_procsubst,
                     dst_fd_word: None,
                 })
             }
@@ -1067,6 +1076,7 @@ impl Parser {
                 let fd: i32 = self.peek().value.parse().unwrap_or(1);
                 self.advance();
                 let file = self.consume().value;
+                let is_procsubst = file.starts_with(">(");
                 Some(FdRedir {
                     src_fd: fd,
                     dst_fd: -2,
@@ -1075,7 +1085,7 @@ impl Parser {
                     is_input: false,
                     heredoc_content: None,
                     is_herestr: false,
-                    is_procsubst: false,
+                    is_procsubst,
                     dst_fd_word: None,
                 })
             }
@@ -1083,6 +1093,7 @@ impl Parser {
                 let fd: i32 = self.peek().value.parse().unwrap_or(0);
                 self.advance();
                 let file = self.consume().value;
+                let is_procsubst = file.starts_with("<(");
                 Some(FdRedir {
                     src_fd: fd,
                     dst_fd: -2,
@@ -1091,7 +1102,7 @@ impl Parser {
                     is_input: true,
                     heredoc_content: None,
                     is_herestr: false,
-                    is_procsubst: false,
+                    is_procsubst,
                     dst_fd_word: None,
                 })
             }
@@ -1099,6 +1110,7 @@ impl Parser {
                 let fd: i32 = self.peek().value.parse().unwrap_or(1);
                 self.advance();
                 let file = self.consume().value;
+                let is_procsubst = file.starts_with(">(");
                 Some(FdRedir {
                     src_fd: fd,
                     dst_fd: -2,
@@ -1107,7 +1119,7 @@ impl Parser {
                     is_input: false,
                     heredoc_content: None,
                     is_herestr: false,
-                    is_procsubst: false,
+                    is_procsubst,
                     dst_fd_word: None,
                 })
             }
@@ -1270,15 +1282,35 @@ fn is_redir_tok(k: &TokKind) -> bool {
 
 fn is_assignment(s: &str) -> bool {
     // VAR=val or VAR+=val: VAR must be valid identifier
+    // Also supports indexed assignment: VAR[IDX]=val or VAR[IDX]+=val
     let Some(eq) = s.find('=') else { return false; };
     // If char before '=' is '+', name is everything before the '+'
-    let name = if eq > 0 && s.as_bytes()[eq - 1] == b'+' {
+    let name_part = if eq > 0 && s.as_bytes()[eq - 1] == b'+' {
         &s[..eq - 1]
     } else {
         &s[..eq]
     };
-    if name.is_empty() { return false; }
-    let mut chars = name.chars();
+    if name_part.is_empty() { return false; }
+
+    // Check for indexed form: NAME[INDEX]
+    if let Some(bracket_pos) = name_part.find('[') {
+        if !name_part.ends_with(']') {
+            return false;
+        }
+        let name = &name_part[..bracket_pos];
+        // name must be a valid identifier
+        if name.is_empty() { return false; }
+        let mut chars = name.chars();
+        let first = chars.next().unwrap();
+        if !first.is_alphabetic() && first != '_' { return false; }
+        if !chars.all(|c| c.is_alphanumeric() || c == '_') { return false; }
+        // The index content itself (between [ and ]) is not validated here —
+        // it will be expanded later at execution time.
+        return true;
+    }
+
+    // Plain NAME=value form (existing logic)
+    let mut chars = name_part.chars();
     let first = chars.next().unwrap();
     if !first.is_alphabetic() && first != '_' { return false; }
     chars.all(|c| c.is_alphanumeric() || c == '_')

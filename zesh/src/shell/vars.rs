@@ -10,6 +10,7 @@ pub const ATTR_UPPERCASE:u32 = 0x04;
 pub const ATTR_LOWERCASE:u32 = 0x08;
 pub const ATTR_EXPORT:   u32 = 0x10;
 pub const ATTR_LOCAL:    u32 = 0x20;
+pub const ATTR_NAMEREF:  u32 = 0x40;
 
 #[derive(Debug, Clone)]
 pub struct Var {
@@ -45,10 +46,11 @@ pub struct ShellFunction {
     pub body: Vec<crate::shell::types::CmdNode>,
     pub defined_at_line: u32,
     pub source_file: String,
+    pub source_code: String,
 }
 
-// Arrays: indexed by integer key
-pub type ShellArray = HashMap<usize, String>;
+// Arrays: can have both numeric and string keys (indexed and associative arrays)
+pub type ShellArray = HashMap<String, String>;
 
 // Global variable store
 pub struct VarStore {
@@ -58,6 +60,7 @@ pub struct VarStore {
     pub arrays: HashMap<String, ShellArray>,
     pub hash_table: HashMap<String, String>,  // command hash cache
     env_cache: Option<HashMap<String, String>>,  // cached environment for exec
+    pub shopt_opts: HashMap<String, bool>,  // shopt options
 }
 
 impl VarStore {
@@ -72,12 +75,29 @@ impl VarStore {
         global.vars.insert("PS2".to_string(), Var::new("> ".to_string()));
         global.vars.insert("OPTIND".to_string(), Var::new("1".to_string()));
         global.vars.insert("OPTARG".to_string(), Var::new(String::new()));
+
+        let mut shopt_opts = HashMap::new();
+        shopt_opts.insert("extglob".to_string(), false);
+        shopt_opts.insert("nullglob".to_string(), false);
+        shopt_opts.insert("dotglob".to_string(), false);
+        shopt_opts.insert("globstar".to_string(), false);
+        shopt_opts.insert("nocaseglob".to_string(), false);
+        shopt_opts.insert("nocasematch".to_string(), false);
+        shopt_opts.insert("expand_aliases".to_string(), false);
+        shopt_opts.insert("histappend".to_string(), false);
+        shopt_opts.insert("checkwinsize".to_string(), true);
+        shopt_opts.insert("cmdhist".to_string(), true);
+        shopt_opts.insert("lithist".to_string(), false);
+        shopt_opts.insert("sourcepath".to_string(), true);
+        shopt_opts.insert("xpg_echo".to_string(), false);
+
         VarStore {
             scopes: vec![global],
             functions: HashMap::new(),
             arrays: HashMap::new(),
             hash_table: HashMap::new(),
             env_cache: None,
+            shopt_opts,
         }
     }
 
@@ -92,10 +112,35 @@ impl VarStore {
     }
 
     pub fn get_str(&self, name: &str) -> Option<String> {
-        self.get(name).map(|v| v.value.clone())
+        self.get_str_with_depth(name, 0)
+    }
+
+    fn get_str_with_depth(&self, name: &str, depth: usize) -> Option<String> {
+        if depth > 8 {
+            return None; // Cycle guard
+        }
+        if let Some(v) = self.get(name) {
+            if v.attrs & ATTR_NAMEREF != 0 {
+                // Follow the nameref
+                return self.get_str_with_depth(&v.value, depth + 1);
+            }
+            return Some(v.value.clone());
+        }
+        None
     }
 
     pub fn set_raw(&mut self, name: &str, value: String, attrs: u32) {
+        // Check if this is a nameref and we're not setting the nameref attr itself
+        if attrs & ATTR_NAMEREF == 0 {
+            if let Some(v) = self.get(name) {
+                if v.attrs & ATTR_NAMEREF != 0 {
+                    let target = v.value.clone();
+                    self.set_raw(&target, value, attrs);
+                    return;
+                }
+            }
+        }
+
         // Check if var is local in the CURRENT innermost scope only
         let scope_count = self.scopes.len();
         if scope_count > 1 {
@@ -231,20 +276,33 @@ impl VarStore {
     }
 
     pub fn get_array(&self, name: &str) -> Option<&ShellArray> {
-        self.arrays.get(name)
+        let real_name = self.resolve_nameref(name);
+        self.arrays.get(&real_name)
     }
 
     pub fn get_array_mut(&mut self, name: &str) -> &mut ShellArray {
-        self.arrays.entry(name.to_string()).or_insert_with(HashMap::new)
+        let real_name = self.resolve_nameref(name);
+        self.arrays.entry(real_name).or_insert_with(HashMap::new)
     }
 
-    pub fn set_array_elem(&mut self, name: &str, idx: usize, value: String) {
-        let arr = self.arrays.entry(name.to_string()).or_insert_with(HashMap::new);
-        arr.insert(idx, value);
+    pub fn set_array_elem(&mut self, name: &str, idx: &str, value: String) {
+        let real_name = self.resolve_nameref(name);
+        let arr = self.arrays.entry(real_name).or_insert_with(HashMap::new);
+        arr.insert(idx.to_string(), value);
+    }
+
+    fn resolve_nameref(&self, name: &str) -> String {
+        if let Some(v) = self.get(name) {
+            if v.attrs & ATTR_NAMEREF != 0 {
+                return v.value.clone();
+            }
+        }
+        name.to_string()
     }
 
     pub fn array_len(&self, name: &str) -> usize {
-        self.arrays.get(name).map(|a| a.len()).unwrap_or(0)
+        let real_name = self.resolve_nameref(name);
+        self.arrays.get(&real_name).map(|a| a.len()).unwrap_or(0)
     }
 
     // Iterate all vars for export to environment

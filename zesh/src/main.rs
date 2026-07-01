@@ -30,6 +30,33 @@ fn main() {
     vars.set_raw("PWD", pwd.clone(), 0);
     ctx.cwd = std::path::PathBuf::from(&pwd);
 
+    // Set UID, EUID, PPID, SHLVL
+    unsafe {
+        let uid = libc::getuid();
+        let euid = libc::geteuid();
+        vars.set_raw("UID", uid.to_string(), crate::shell::vars::ATTR_READONLY);
+        vars.set_raw("EUID", euid.to_string(), crate::shell::vars::ATTR_READONLY);
+    }
+    vars.set_raw("PPID", std::os::unix::process::parent_id().to_string(), 0);
+
+    // SHLVL: increment from environment or start at 1
+    let shlvl = std::env::var("SHLVL")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0) + 1;
+    vars.set_raw("SHLVL", shlvl.to_string(), crate::shell::vars::ATTR_EXPORT);
+
+    // HOSTNAME
+    if vars.get_str("HOSTNAME").is_none() {
+        let hostname = std::fs::read_to_string("/etc/hostname")
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        if !hostname.is_empty() {
+            vars.set_raw("HOSTNAME", hostname, 0);
+        }
+    }
+
     // Export all env vars
     for (k, val) in std::env::vars() {
         vars.set_raw(&k, val, crate::shell::vars::ATTR_EXPORT);
