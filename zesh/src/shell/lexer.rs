@@ -743,6 +743,14 @@ impl Lexer {
                     if self.peek() == Some('&') {
                         self.advance();
                         tokens.push(Token { kind: TokKind::And, value: "&&".to_string(), quoted: false, line });
+                    } else if self.peek() == Some('>') {
+                        self.advance();
+                        if self.peek() == Some('>') {
+                            self.advance();
+                            tokens.push(Token { kind: TokKind::RedirAmpAppend, value: "&>>".to_string(), quoted: false, line });
+                        } else {
+                            tokens.push(Token { kind: TokKind::RedirAmpOut, value: "&>".to_string(), quoted: false, line });
+                        }
                     } else {
                         tokens.push(Token { kind: TokKind::Bg, value: "&".to_string(), quoted: false, line });
                     }

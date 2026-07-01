@@ -319,10 +319,44 @@ fn apply_redirections_save(
     vars: &mut VarStore,
 ) -> Result<Vec<SavedFd>, Vec<SavedFd>> {
     let mut saved = Vec::new();
+
     for redir in redirs {
-        match apply_one_redir_save(redir, ctx, vars) {
-            Some(s) => saved.push(s),
-            None => return Err(saved),
+        // If this is an &> or &>> redirection (redirect both stdout and stderr),
+        // apply redirection to fd 1 (stdout), then dup it to fd 2 (stderr)
+        if redir.is_amp_redir {
+            // Apply redirection to fd 1 (stdout) to open/redirect to the target
+            match apply_one_redir_save(redir, ctx, vars) {
+                Some(s) => saved.push(s),
+                None => return Err(saved),
+            }
+
+            // Now redirect fd 2 (stderr) to the same place as fd 1 (stdout) using dup2
+            // Save original fd 2
+            // SAFETY: dup with valid fd
+            let saved_fd = unsafe { libc::dup(2) };
+
+            // Dup fd 1 to fd 2
+            // SAFETY: dup2 with valid fds
+            unsafe {
+                libc::dup2(1, 2);
+            }
+
+            if saved_fd >= 0 {
+                saved.push(SavedFd {
+                    orig_fd: 2,
+                    saved_fd,
+                });
+            } else {
+                saved.push(SavedFd {
+                    orig_fd: 2,
+                    saved_fd: -1,
+                });
+            }
+        } else {
+            match apply_one_redir_save(redir, ctx, vars) {
+                Some(s) => saved.push(s),
+                None => return Err(saved),
+            }
         }
     }
     Ok(saved)
@@ -2028,10 +2062,7 @@ fn try_builtin(
         "[[" => Some(builtin_test_pattern(args)), // [[ uses glob/pattern matching for = and !=
         "]]" => Some(0), // closing bracket, shouldn't be called directly
         "eval" => Some(builtin_eval(args, redirs, ctx, vars)),
-        "type" => {
-            let status = builtin_type(args, vars);
-            Some(with_redirections(redirs, ctx, vars, |_, _| status))
-        }
+        "type" => Some(builtin_type(args, redirs, ctx, vars)),
         "hash" => Some(builtin_hash(args, redirs, ctx, vars)),
         "wait" => Some(builtin_wait(args, vars)),
         "jobs" => Some(builtin_jobs(args, redirs, ctx, vars)),

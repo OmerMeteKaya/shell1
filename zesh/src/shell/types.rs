@@ -19,6 +19,8 @@ pub enum TokKind {
     RedirIn,      // <
     RedirOut,     // >
     RedirAppend,  // >>
+    RedirAmpOut,  // &>  (redirect both stdout and stderr)
+    RedirAmpAppend, // &>> (append both stdout and stderr)
     RedirHeredoc, // <<
     RedirHerestr, // <<<
     RedirFdOut,   // N>
@@ -66,6 +68,7 @@ pub struct FdRedir {
     pub heredoc_content: Option<String>,
     pub is_herestr: bool,
     pub is_procsubst: bool, // <(cmd)
+    pub is_amp_redir: bool, // &> or &>> (redirect both stdout and stderr)
 }
 
 // A single command with its words and redirections

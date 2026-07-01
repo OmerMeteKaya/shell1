@@ -849,7 +849,31 @@ pub fn expand_word(word: &str, quoted: bool, vars: &crate::shell::vars::VarStore
             }
         }
 
-        if inner.ends_with("[@]") && !inner.starts_with('#') {
+        // Check for ${!arr[@]} or ${!arr[*]} — array key/index listing
+        if inner.starts_with('!') && (inner.ends_with("[@]") || inner.ends_with("[*]")) {
+            let rest = &inner[1..];
+            let arr_name = &rest[..rest.len()-3];
+            if !arr_name.is_empty() && !arr_name.contains('[') {
+                if let Some(arr) = vars.get_array(arr_name) {
+                    let mut keys: Vec<String> = arr.keys().cloned().collect();
+                    keys.sort_by(|a, b| {
+                        let a_num = a.parse::<i64>();
+                        let b_num = b.parse::<i64>();
+                        match (a_num, b_num) {
+                            (Ok(an), Ok(bn)) => an.cmp(&bn),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => a.cmp(b),
+                        }
+                    });
+                    return keys;
+                }
+                // Array doesn't exist, return empty
+                return vec![];
+            }
+        }
+
+        if inner.ends_with("[@]") && !inner.starts_with('#') && !inner.starts_with('!') {
             let arr_name = &inner[..inner.len()-3];
             if let Some(arr) = vars.get_array(arr_name) {
                 let mut keys: Vec<String> = arr.keys().cloned().collect();
@@ -1380,6 +1404,28 @@ fn expand_dollar(chars: &[char], start: usize, vars: &crate::shell::vars::VarSto
             };
             (bg_pid, i - start)
         }
+        '-' => {
+            i += 1;
+            let mut flags = String::new();
+            // Always include for bash compatibility
+            flags.push('h');
+            flags.push('B');
+            // Check invocation mode
+            if vars.get_str("_ZESH_MODE_C").map(|v| v == "1").unwrap_or(false) {
+                flags.push('c');
+            }
+            // Check set options
+            if vars.get_str("_ZESH_OPT_ERREXIT").map(|v| v == "1").unwrap_or(false) {
+                flags.push('e');
+            }
+            if vars.get_str("_ZESH_OPT_XTRACE").map(|v| v == "1").unwrap_or(false) {
+                flags.push('x');
+            }
+            if vars.get_str("_ZESH_OPT_NOUNSET").map(|v| v == "1").unwrap_or(false) {
+                flags.push('u');
+            }
+            (flags, i - start)
+        }
         '0' => {
             i += 1;
             let v = vars.get_str("0").unwrap_or_default();
@@ -1432,10 +1478,20 @@ fn expand_special_var(name: &str, vars: &crate::shell::vars::VarStore, _script_f
             vars.get_str("FUNCNAME").unwrap_or_default()
         }
         "BASH_SOURCE" => {
-            vars.get_str("BASH_SOURCE").unwrap_or_default()
+            // Try array first (element 0), then fall back to scalar
+            if let Some(arr) = vars.get_array("BASH_SOURCE") {
+                arr.get("0").cloned().unwrap_or_default()
+            } else {
+                vars.get_str("BASH_SOURCE").unwrap_or_default()
+            }
         }
         _ => {
-            vars.get_str(name).unwrap_or_default()
+            // For any variable, check if it's an array and return element 0
+            if let Some(arr) = vars.get_array(name) {
+                arr.get("0").cloned().unwrap_or_default()
+            } else {
+                vars.get_str(name).unwrap_or_default()
+            }
         }
     }
 }
@@ -1484,6 +1540,31 @@ fn expand_param(content: &str, vars: &crate::shell::vars::VarStore, script_file:
     // Handle indirect expansion ${!VAR} or ${!prefix*} / ${!prefix@}
     if content.starts_with('!') {
         let rest = &content[1..];
+
+        // Check for ${!arrname[@]} / ${!arrname[*]} — array key/index listing
+        if (rest.ends_with("[@]") || rest.ends_with("[*]")) && rest.len() > 3 {
+            let arr_name = &rest[..rest.len()-3];
+            // arr_name must be a valid identifier (no further brackets)
+            if !arr_name.is_empty() && !arr_name.contains('[') {
+                if let Some(arr) = vars.get_array(arr_name) {
+                    let mut keys: Vec<&String> = arr.keys().collect();
+                    // Sort: numeric keys numerically (for indexed arrays), string keys lexically (assoc)
+                    keys.sort_by(|a, b| {
+                        let a_num = a.parse::<i64>();
+                        let b_num = b.parse::<i64>();
+                        match (a_num, b_num) {
+                            (Ok(an), Ok(bn)) => an.cmp(&bn),
+                            (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                            (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                            (Err(_), Err(_)) => a.cmp(b),
+                        }
+                    });
+                    return keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(" ");
+                }
+                // Array doesn't exist — bash returns empty, not an error, for ${!undefined[@]}
+                return String::new();
+            }
+        }
 
         // Check for ${!prefix*} or ${!prefix@} (list variable names)
         if rest.ends_with('*') || rest.ends_with('@') {

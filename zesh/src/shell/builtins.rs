@@ -180,7 +180,30 @@ pub fn builtin_printf(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext
     }
 
     if let Some(varname) = var_target {
-        vars.set(&varname, full_output);
+        // Check for array element target: NAME[INDEX]
+        if let Some(bracket_pos) = varname.find('[') {
+            if varname.ends_with(']') {
+                let arr_name = &varname[..bracket_pos];
+                let index_expr = &varname[bracket_pos+1..varname.len()-1];
+                // Expand the index expression (it may contain $vars, arithmetic, etc.)
+                let expanded_index = expand_string(index_expr, vars, &ctx.script_file);
+                // For numeric indices, evaluate arithmetic; otherwise use the expanded string
+                let index_str = if looks_like_arithmetic_idx(&expanded_index) {
+                    if let Ok(n) = crate::shell::expand::eval_arith_expr_with_vars(&expanded_index, vars) {
+                        n.to_string()
+                    } else {
+                        expanded_index
+                    }
+                } else {
+                    expanded_index
+                };
+                vars.set_array_elem(arr_name, &index_str, full_output);
+            } else {
+                vars.set(&varname, full_output);
+            }
+        } else {
+            vars.set(&varname, full_output);
+        }
     } else {
         print!("{}", full_output);
         let _ = io::stdout().flush();
@@ -578,17 +601,37 @@ pub fn builtin_set(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) 
                 vars.set_raw("#", ctx.pos_params.len().to_string(), 0);
                 return 0;
             }
-            "-e" => { ctx.opt_errexit = true; }
-            "+e" => { ctx.opt_errexit = false; }
-            "-x" => { ctx.opt_xtrace = true; }
-            "+x" => { ctx.opt_xtrace = false; }
+            "-e" => {
+                ctx.opt_errexit = true;
+                vars.set_raw("_ZESH_OPT_ERREXIT", "1".to_string(), 0);
+            }
+            "+e" => {
+                ctx.opt_errexit = false;
+                vars.set_raw("_ZESH_OPT_ERREXIT", "0".to_string(), 0);
+            }
+            "-x" => {
+                ctx.opt_xtrace = true;
+                vars.set_raw("_ZESH_OPT_XTRACE", "1".to_string(), 0);
+            }
+            "+x" => {
+                ctx.opt_xtrace = false;
+                vars.set_raw("_ZESH_OPT_XTRACE", "0".to_string(), 0);
+            }
             "-o" => {
                 i += 1;
                 if i < args.len() {
                     match args[i].as_str() {
-                        "errexit" => { ctx.opt_errexit = true; }
-                        "pipefail" => { ctx.opt_pipefail = true; }
-                        "xtrace" => { ctx.opt_xtrace = true; }
+                        "errexit" => {
+                            ctx.opt_errexit = true;
+                            vars.set_raw("_ZESH_OPT_ERREXIT", "1".to_string(), 0);
+                        }
+                        "pipefail" => {
+                            ctx.opt_pipefail = true;
+                        }
+                        "xtrace" => {
+                            ctx.opt_xtrace = true;
+                            vars.set_raw("_ZESH_OPT_XTRACE", "1".to_string(), 0);
+                        }
                         _ => {}
                     }
                 }
@@ -597,9 +640,18 @@ pub fn builtin_set(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) 
                 // Multiple flags: -ef, -ex, etc
                 for c in s[1..].chars() {
                     match c {
-                        'e' => { ctx.opt_errexit = true; }
-                        'x' => { ctx.opt_xtrace = true; }
-                        'u' => { ctx.opt_nounset = true; }
+                        'e' => {
+                            ctx.opt_errexit = true;
+                            vars.set_raw("_ZESH_OPT_ERREXIT", "1".to_string(), 0);
+                        }
+                        'x' => {
+                            ctx.opt_xtrace = true;
+                            vars.set_raw("_ZESH_OPT_XTRACE", "1".to_string(), 0);
+                        }
+                        'u' => {
+                            ctx.opt_nounset = true;
+                            vars.set_raw("_ZESH_OPT_NOUNSET", "1".to_string(), 0);
+                        }
                         _ => {}
                     }
                 }
@@ -607,9 +659,18 @@ pub fn builtin_set(args: &[String], ctx: &mut ExecContext, vars: &mut VarStore) 
             s if s.starts_with('+') && s.len() > 1 => {
                 for c in s[1..].chars() {
                     match c {
-                        'e' => { ctx.opt_errexit = false; }
-                        'x' => { ctx.opt_xtrace = false; }
-                        'u' => { ctx.opt_nounset = false; }
+                        'e' => {
+                            ctx.opt_errexit = false;
+                            vars.set_raw("_ZESH_OPT_ERREXIT", "0".to_string(), 0);
+                        }
+                        'x' => {
+                            ctx.opt_xtrace = false;
+                            vars.set_raw("_ZESH_OPT_XTRACE", "0".to_string(), 0);
+                        }
+                        'u' => {
+                            ctx.opt_nounset = false;
+                            vars.set_raw("_ZESH_OPT_NOUNSET", "0".to_string(), 0);
+                        }
                         _ => {}
                     }
                 }
@@ -808,6 +869,24 @@ pub fn builtin_declare(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContex
                 if var.attrs & ATTR_EXPORT != 0 { flags.push_str(" -x"); }
                 if var.attrs & ATTR_NAMEREF != 0 { flags.push_str(" -n"); }
                 println!("{} {}=\"{}\"", flags, arg, var.value);
+            } else if let Some(arr) = vars.arrays.get(arg) {
+                // Array variable exists — print in declare -a format
+                let mut keys: Vec<&String> = arr.keys().collect();
+                // Sort keys: numeric indices first (in numeric order), then string keys
+                keys.sort_by(|a, b| {
+                    let a_num = a.parse::<i64>();
+                    let b_num = b.parse::<i64>();
+                    match (a_num, b_num) {
+                        (Ok(an), Ok(bn)) => an.cmp(&bn),
+                        (Ok(_), Err(_)) => std::cmp::Ordering::Less,
+                        (Err(_), Ok(_)) => std::cmp::Ordering::Greater,
+                        (Err(_), Err(_)) => a.cmp(b),
+                    }
+                });
+                let elems: Vec<String> = keys.iter()
+                    .map(|k| format!("[{}]=\"{}\"", k, arr.get(*k).unwrap()))
+                    .collect();
+                println!("declare -a {}=({})", arg, elems.join(" "));
             } else {
                 eprintln!("zesh: declare: {}: not found", arg);
                 status = 1;
@@ -1321,7 +1400,11 @@ pub fn builtin_eval(args: &[String], redirs: &[FdRedir], ctx: &mut ExecContext, 
     status
 }
 
-pub fn builtin_type(args: &[String], vars: &VarStore) -> i32 {
+pub fn builtin_type(args: &[String], redirs: &[crate::shell::types::FdRedir], ctx: &mut crate::shell::executor::ExecContext, vars: &mut VarStore) -> i32 {
+    use crate::shell::executor::{apply_redirections_for_builtin, restore_redirections_builtin};
+
+    let saved = apply_redirections_for_builtin(redirs, ctx, vars);
+
     let mut path_only = false;      // -p: print path only, silent if not external
     let mut force_path = false;     // -P: force PATH search only
     let mut print_type = false;     // -t: print type string only
@@ -1408,6 +1491,8 @@ pub fn builtin_type(args: &[String], vars: &VarStore) -> i32 {
             }
         }
     }
+
+    restore_redirections_builtin(saved);
     status
 }
 

@@ -984,6 +984,7 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: false,
                     is_procsubst,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1000,6 +1001,7 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: false,
                     is_procsubst,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1016,6 +1018,39 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: false,
                     is_procsubst,
+                    is_amp_redir: false,
+                    dst_fd_word: None,
+                })
+            }
+            TokKind::RedirAmpOut => {
+                self.advance();
+                let file = self.consume().value;
+                Some(FdRedir {
+                    src_fd: 1,  // redirect stdout
+                    dst_fd: -2,
+                    file: Some(file),
+                    append: false,
+                    is_input: false,
+                    heredoc_content: None,
+                    is_herestr: false,
+                    is_procsubst: false,
+                    is_amp_redir: true,
+                    dst_fd_word: None,
+                })
+            }
+            TokKind::RedirAmpAppend => {
+                self.advance();
+                let file = self.consume().value;
+                Some(FdRedir {
+                    src_fd: 1,  // redirect stdout
+                    dst_fd: -2,
+                    file: Some(file),
+                    append: true,
+                    is_input: false,
+                    heredoc_content: None,
+                    is_herestr: false,
+                    is_procsubst: false,
+                    is_amp_redir: true,
                     dst_fd_word: None,
                 })
             }
@@ -1054,6 +1089,7 @@ impl Parser {
                     heredoc_content: Some(heredoc_content),
                     is_herestr: false,
                     is_procsubst: false,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1069,6 +1105,7 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: true,
                     is_procsubst: false,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1086,6 +1123,7 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: false,
                     is_procsubst,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1103,6 +1141,7 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: false,
                     is_procsubst,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1120,6 +1159,7 @@ impl Parser {
                     heredoc_content: None,
                     is_herestr: false,
                     is_procsubst,
+                    is_amp_redir: false,
                     dst_fd_word: None,
                 })
             }
@@ -1140,6 +1180,7 @@ impl Parser {
                         heredoc_content: None,
                         is_herestr: false,
                         is_procsubst: false,
+                    is_amp_redir: false,
                     })
                 } else {
                     // Next token is target fd or - (may be a word needing expansion)
@@ -1161,6 +1202,7 @@ impl Parser {
                         heredoc_content: None,
                         is_herestr: false,
                         is_procsubst: false,
+                    is_amp_redir: false,
                     })
                 }
             }
@@ -1179,6 +1221,7 @@ impl Parser {
                         heredoc_content: None,
                         is_herestr: false,
                         is_procsubst: false,
+                    is_amp_redir: false,
                     })
                 } else {
                     let target = self.consume().value;
@@ -1199,6 +1242,7 @@ impl Parser {
                         heredoc_content: None,
                         is_herestr: false,
                         is_procsubst: false,
+                    is_amp_redir: false,
                     })
                 }
             }

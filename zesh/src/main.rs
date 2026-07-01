@@ -20,7 +20,7 @@ fn main() {
     // Initialize environment
     vars.set_raw("$", std::process::id().to_string(), 0);
     vars.set_raw("0", args[0].clone(), 0);
-    vars.set_raw("BASH_SOURCE", args[0].clone(), 0);
+    vars.set_array_elem("BASH_SOURCE", "0", args[0].clone());
     vars.set_raw("SECONDS", "0".to_string(), 0);
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
     vars.set_raw("HOME", home, 0);
@@ -94,6 +94,7 @@ fn main() {
                     vars.set_raw(&(i+1).to_string(), arg.clone(), 0);
                 }
                 vars.set_raw("#", args[arg_idx + 2..].len().to_string(), 0);
+                vars.set_raw("_ZESH_MODE_C", "1".to_string(), 0);
                 ctx.pos_params = args[arg_idx + 2..].to_vec();
 
                 if no_execute {
@@ -129,7 +130,7 @@ fn main() {
         // Script file argument
         let script_file = args[arg_idx].clone();
         vars.set_raw("0", script_file.clone(), 0);
-        vars.set_raw("BASH_SOURCE", script_file.clone(), 0);
+        vars.set_array_elem("BASH_SOURCE", "0", script_file.clone());
         for (i, arg) in args[arg_idx + 1..].iter().enumerate() {
             vars.set_raw(&(i+1).to_string(), arg.clone(), 0);
         }
