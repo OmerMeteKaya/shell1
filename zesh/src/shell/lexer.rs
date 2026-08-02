@@ -699,6 +699,13 @@ impl Lexer {
 
     pub fn tokenize(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
+        // Heredoc delimiters seen on the current logical line, awaiting body skip
+        // once the line's terminating newline is reached. Bodies are skipped
+        // immediately (raw, unlexed) rather than re-tokenized as shell code,
+        // since arbitrary text (C comments, contractions, etc.) inside a heredoc
+        // body is not valid shell syntax and would otherwise corrupt quote-state
+        // tracking for everything that follows.
+        let mut pending_heredocs: Vec<(String, bool)> = Vec::new();
 
         loop {
             self.skip_whitespace();
@@ -707,6 +714,12 @@ impl Lexer {
 
             match self.peek() {
                 None => {
+                    for (delim_raw, strip_tabs) in pending_heredocs.drain(..) {
+                        let bare_delim: String = delim_raw.chars()
+                            .filter(|&c| c != '\'' && c != '"' && c != '\\')
+                            .collect();
+                        self.skip_heredoc_body(bare_delim.trim(), strip_tabs);
+                    }
                     tokens.push(Token { kind: TokKind::Eof, value: String::new(), quoted: false, line });
                     break;
                 }
@@ -716,6 +729,12 @@ impl Lexer {
                 Some('\n') => {
                     self.advance();
                     tokens.push(Token { kind: TokKind::Newline, value: "\n".to_string(), quoted: false, line });
+                    for (delim_raw, strip_tabs) in pending_heredocs.drain(..) {
+                        let bare_delim: String = delim_raw.chars()
+                            .filter(|&c| c != '\'' && c != '"' && c != '\\')
+                            .collect();
+                        self.skip_heredoc_body(bare_delim.trim(), strip_tabs);
+                    }
                 }
                 Some(';') => {
                     self.advance();
@@ -807,11 +826,29 @@ impl Lexer {
                         if self.peek() == Some('<') {
                             self.advance();
                             tokens.push(Token { kind: TokKind::RedirHerestr, value: "<<<".to_string(), quoted: false, line });
-                        } else if self.peek() == Some('-') {
-                            self.advance();
-                            tokens.push(Token { kind: TokKind::RedirHeredoc, value: "<<-".to_string(), quoted: false, line });
                         } else {
-                            tokens.push(Token { kind: TokKind::RedirHeredoc, value: "<<".to_string(), quoted: false, line });
+                            let strip_tabs = if self.peek() == Some('-') {
+                                self.advance();
+                                true
+                            } else {
+                                false
+                            };
+                            tokens.push(Token {
+                                kind: TokKind::RedirHeredoc,
+                                value: if strip_tabs { "<<-".to_string() } else { "<<".to_string() },
+                                quoted: false,
+                                line,
+                            });
+                            // Read the delimiter word now (still on this source line)
+                            // and remember it so the body can be skipped as raw text
+                            // once this logical line ends, instead of being re-lexed
+                            // as shell syntax by the main scan.
+                            self.skip_whitespace();
+                            let delim_line = self.line;
+                            let (delim_raw, delim_quoted) = self.read_word_raw();
+                            let delim_kind = word_to_keyword(&delim_raw);
+                            tokens.push(Token { kind: delim_kind, value: delim_raw.clone(), quoted: delim_quoted, line: delim_line });
+                            pending_heredocs.push((delim_raw, strip_tabs));
                         }
                     } else if self.peek() == Some('&') {
                         self.advance();
@@ -1042,6 +1079,38 @@ impl Lexer {
                 }
             }
             i += 1;
+        }
+    }
+
+    // Consume characters from the current position through the heredoc's
+    // terminator line (inclusive), without producing tokens. This keeps
+    // heredoc bodies (which may contain arbitrary non-shell text) out of the
+    // main token stream entirely, so they can't desync quote-state tracking
+    // for the rest of the file. self.line/self.pos land exactly where the
+    // line-based lookup in collect_heredoc_from_line expects them to.
+    fn skip_heredoc_body(&mut self, bare_delim: &str, strip_tabs: bool) {
+        loop {
+            if self.peek().is_none() {
+                return;
+            }
+            let mut line_buf = String::new();
+            let mut hit_newline = false;
+            while let Some(c) = self.peek() {
+                if c == '\n' {
+                    self.advance();
+                    hit_newline = true;
+                    break;
+                }
+                line_buf.push(c);
+                self.advance();
+            }
+            let check: &str = if strip_tabs { line_buf.trim_start_matches('\t') } else { &line_buf };
+            if check == bare_delim {
+                return;
+            }
+            if !hit_newline {
+                return;
+            }
         }
     }
 
